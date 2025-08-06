@@ -163,7 +163,7 @@ function genesisFor(chain: ChainId) {
   const topology = peerKeys.get(chain)!.map(x => x.publicKey());
 
   return {
-    chain: chain,
+    chain: chainToStr(chain),
     executor: "executor.wasm",
     instructions,
     wasm_dir: "PLACEHOLDER",
@@ -206,21 +206,20 @@ function peerComposeService(chain: ChainId, i: number) {
     });
   }
 
-  // FIXME: cannot access volume configs
   const command = isGenesis
     ? `/bin/sh -c "
-  kagami genesis sign /config/chain-${chainToStr(chain)}-genesis.json \
-    --public-key $GENESIS_PUBLIC_KEY \
-    --private-key $GENESIS_PRIVATE_KEY \
-    --out-file /tmp/genesis.signed.scale \
-    && irohad --config /config/iroha/irohad.toml --submit-genesis
+  kagami genesis sign /config/chain-${chainToStr(chain)}-genesis.json \\\n\
+    --public-key $GENESIS_PUBLIC_KEY \\\n\
+    --private-key $GENESIS_PRIVATE_KEY \\\n\
+    --out-file /tmp/genesis.signed.scale \\\n\
+  && irohad --config /config/irohad.toml
 "`
     : `irohad --config /config/irohad.toml`;
 
   return {
     [id]: {
       image: IROHA_IMAGE,
-      volumnes: [
+      volumes: [
         ".:/config",
       ],
       environment,
