@@ -6,6 +6,8 @@ import * as fs from "@std/fs";
 import * as path from "@std/path";
 import * as TOML from "@std/toml";
 import * as YAML from "@std/yaml";
+import { z } from "zod";
+import * as uiShared from "../ui/src/shared.ts";
 
 const dirname = import.meta.dirname;
 assert(dirname);
@@ -34,6 +36,7 @@ const userAccounts = new Map(CHAINS.map((chain) => {
   return [
     chain,
     Array.from({ length: ACCOUNTS_ON_CHAIN }, () => {
+      // FIXME: this is not unique!
       const alias = faker.person.firstName();
       const key = KeyPair.random();
       const id = new AccountId(key.publicKey(), new DomainId("wonderland"));
@@ -68,6 +71,13 @@ const genesisKeys = new Map<ChainId, KeyPair>(([...CHAINS, Hub] as const).map((c
 const peerKeys = new Map<ChainId, KeyPair[]>(
   ([...CHAINS, Hub] as const).map(chain => [chain, Array.from({ length: PEERS_ON_CHAIN }, () => KeyPair.random())]),
 );
+
+const adminKey = KeyPair.random();
+const admin = {
+  key: adminKey,
+  id: AccountId.parse(`${adminKey.publicKey().multihash()}@system`),
+  alias: "admin",
+};
 
 const sharedConfig = {
   network: {
@@ -107,11 +117,11 @@ function genesisFor(chain: ChainId) {
     registerDomains = [
       // for assets and accounts
       "wonderland",
-      // for relay
+      // for relay & admin
       "system",
       ...omnibusDomains,
     ];
-    registerAccounts = [...accounts, ...omnibus, relay];
+    registerAccounts = [...accounts, ...omnibus, relay, admin];
     mintAssets = [
       ...[...accounts].flatMap((account) => account.initQuantities),
       ...omnibusTotals,
@@ -123,10 +133,10 @@ function genesisFor(chain: ChainId) {
       ...omnibusDomains,
       // for assets
       "wonderland",
-      // for relays
+      // for relays & admin
       "system",
     ];
-    registerAccounts = [...omnibus, ...relays];
+    registerAccounts = [...omnibus, ...relays, admin];
     mintAssets = omnibusTotals;
   }
 
@@ -188,6 +198,12 @@ function peerServiceId(chain: ChainId, i: number): string {
   return `chain_${chainToStr(chain)}_irohad_${i}`;
 }
 
+function chainPublicPort(chain: ChainId): number {
+  return ALL_CHAINS
+    .map((x, i) => ({ chain: x, port: 8080 + i }))
+    .find((x) => x.chain === chain)!.port;
+}
+
 function peerComposeService(chain: ChainId, i: number) {
   const peerKey = peerKeys.get(chain)!.at(i)!;
   const genesisKey = genesisKeys.get(chain)!;
@@ -228,6 +244,8 @@ function peerComposeService(chain: ChainId, i: number) {
 "`
     : `irohad --config /config/irohad.toml`;
 
+  const ports = i === 0 ? [`${chainPublicPort(chain)}:8080`] : [];
+
   return {
     [id]: {
       image: IROHA_IMAGE,
@@ -235,6 +253,7 @@ function peerComposeService(chain: ChainId, i: number) {
         ".:/config",
       ],
       environment,
+      ports,
       init: true,
       command,
     },
@@ -279,23 +298,22 @@ function relayServices() {
   }));
 }
 
-function uiConfig() {
+function uiConfig(): z.input<typeof uiShared.Config> {
   return {
-    accounts: [...userAccounts].flatMap(([chain, accounts]) =>
-      accounts.map(account => ({
-        chain,
-        account: account.id,
-        privateKey: account.key.privateKey(),
-      }))
-    ),
+    authority: admin.id.toString(),
+    authorityPrivateKey: admin.key.privateKey().multihash(),
+    chains: Object.fromEntries(ALL_CHAINS.map(x => [x, {
+      toriiUrl: `http://localhost:${chainPublicPort(x)}`,
+    }])),
   };
 }
 
 function uiService() {
   return {
-    build: "../Dockerfile.ui",
+    build: { context: "..", dockerfile: "ui/Dockerfile" },
+    volumes: [".:/config"],
     environment: {
-      // TODO
+      UI_CONFIG: "/config/ui.json",
     },
   };
 }

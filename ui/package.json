@@ -1,0 +1,27 @@
+{
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.14.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@iroha/client": "jsr:0.4.0",
+    "@iroha/core": "jsr:0.4.0",
+    "@unocss/reset": "^66.4.1",
+    "@vue-kakuyaku/core": "^0.4.3",
+    "ts-pattern": "^5.8.0",
+    "unocss": "^66.4.1",
+    "vue": "^3.5.17",
+    "zod": "^4.0.15"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.0",
+    "@vue/tsconfig": "^0.7.0",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.4",
+    "vue-tsc": "^2.2.12"
+  }
+}
