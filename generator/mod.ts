@@ -104,7 +104,13 @@ function genesisFor(chain: ChainId) {
     const accounts = userAccounts.get(chain)!;
     const relay = relayAccounts.get(chain)!;
 
-    registerDomains = ["wonderland", "system", ...omnibusDomains];
+    registerDomains = [
+      // for assets and accounts
+      "wonderland",
+      // for relay
+      "system",
+      ...omnibusDomains,
+    ];
     registerAccounts = [...accounts, ...omnibus, relay];
     mintAssets = [
       ...[...accounts].flatMap((account) => account.initQuantities),
@@ -113,7 +119,13 @@ function genesisFor(chain: ChainId) {
   } else {
     const relays = CHAINS.map(x => relayAccounts.get(x)!);
 
-    registerDomains = ["system", ...omnibusDomains];
+    registerDomains = [
+      ...omnibusDomains,
+      // for assets
+      "wonderland",
+      // for relays
+      "system",
+    ];
     registerAccounts = [...omnibus, ...relays];
     mintAssets = omnibusTotals;
   }
