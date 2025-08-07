@@ -1,16 +1,24 @@
-import { AccountId, PrivateKey } from "@iroha/core/data-model";
+import { AccountId, AssetDefinitionId, PrivateKey } from "@iroha/core/data-model";
 import { z } from "zod";
 
 const AccountSchema = z.string().transform(x => AccountId.parse(x));
 const PrivKeySchema = z.string().transform(x => PrivateKey.fromMultihash(x));
+const AssetDefinitionIdSchema = z.string().transform(x => AssetDefinitionId.parse(x));
 
 export const Config = z.object({
   authority: AccountSchema,
   authorityPrivateKey: PrivKeySchema,
+  transferrable: z.array(AssetDefinitionIdSchema),
   chains: z.record(
     z.string(),
-    z.object({
-      toriiUrl: z.url(),
-    }),
+    z.discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("domestic"),
+        toriiUrl: z.url(),
+        omnibus: AccountSchema,
+        users: z.array(z.object({ id: AccountSchema, alias: z.string() })),
+      }),
+      z.object({ kind: z.literal("hub"), toriiUrl: z.url() }),
+    ]),
   ),
 });

@@ -12,6 +12,8 @@
     "@iroha/core": "jsr:0.4.0",
     "@unocss/reset": "^66.4.1",
     "@vue-kakuyaku/core": "^0.4.3",
+    "@vueuse/core": "^13.6.0",
+    "tiny-invariant": "^1.3.3",
     "ts-pattern": "^5.8.0",
     "unocss": "^66.4.1",
     "vue": "^3.5.17",

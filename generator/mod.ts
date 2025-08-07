@@ -299,12 +299,30 @@ function relayServices() {
 }
 
 function uiConfig(): z.input<typeof uiShared.Config> {
+  type ChainValue = z.input<typeof uiShared.Config>["chains"][string];
+
   return {
     authority: admin.id.toString(),
     authorityPrivateKey: admin.key.privateKey().multihash(),
-    chains: Object.fromEntries(ALL_CHAINS.map(x => [x, {
-      toriiUrl: `http://localhost:${chainPublicPort(x)}`,
-    }])),
+    transferrable: ASSETS.map(x => x.toString()),
+    chains: Object.fromEntries(
+      ALL_CHAINS.map<[string, ChainValue]>(
+        x => {
+          const toriiUrl = `http://localhost:${chainPublicPort(x)}`;
+          return [
+            chainToStr(x),
+            x === Hub
+              ? { kind: "hub", toriiUrl }
+              : {
+                kind: "domestic",
+                toriiUrl,
+                omnibus: omnibusAccounts.get(x)!.id.toString(),
+                users: userAccounts.get(x)!.map(x => ({ alias: x.alias, id: x.id.toString() })),
+              },
+          ];
+        },
+      ),
+    ),
   };
 }
 
