@@ -109,6 +109,7 @@ function genesisFor(chain: ChainId) {
   let registerDomains: (string | DomainId)[];
   let registerAccounts: { id: AccountId; alias: string }[];
   let mintAssets: { id: AssetId; quantity: number | string }[];
+  let misc: JsonValue[] = [];
 
   if (chain !== Hub) {
     const accounts = userAccounts.get(chain)!;
@@ -126,6 +127,18 @@ function genesisFor(chain: ChainId) {
       ...[...accounts].flatMap((account) => account.initQuantities),
       ...omnibusTotals,
     ];
+
+    misc = ASSETS.map(asset => ({
+      Grant: {
+        Permission: {
+          object: {
+            name: "CanTransferAssetWithDefinition",
+            payload: { asset_definition: asset.toString() },
+          },
+          destination: admin.id.toString(),
+        },
+      },
+    }));
   } else {
     const relays = CHAINS.map(x => relayAccounts.get(x)!);
 
@@ -180,6 +193,8 @@ function genesisFor(chain: ChainId) {
         },
       },
     })),
+
+    ...misc,
   ];
 
   const topology = peerKeys.get(chain)!.map(x => x.publicKey());
