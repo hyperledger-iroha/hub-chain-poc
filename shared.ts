@@ -5,7 +5,7 @@ const AccountSchema = z.string().transform(x => AccountId.parse(x));
 const PrivKeySchema = z.string().transform(x => PrivateKey.fromMultihash(x));
 const AssetDefinitionIdSchema = z.string().transform(x => AssetDefinitionId.parse(x));
 
-export const Config = z.object({
+export const UiConfigSchema = z.object({
   authority: AccountSchema,
   authorityPrivateKey: PrivKeySchema,
   transferrable: z.array(AssetDefinitionIdSchema),
@@ -21,4 +21,15 @@ export const Config = z.object({
       z.object({ kind: z.literal("hub"), toriiUrl: z.url() }),
     ]),
   ),
+});
+
+export const RelayConfigSchema = z.object({
+  authority: AccountSchema,
+  authorityPrivateKey: PrivKeySchema,
+  omnibusAccounts: z.array(AccountSchema),
+  domesticChainId: z.string(),
+  domesticToriiUrl: z.url(),
+  domesticOmnibusAccount: AccountSchema,
+  hubToriiUrl: z.url(),
+  hubChainId: z.string(),
 });

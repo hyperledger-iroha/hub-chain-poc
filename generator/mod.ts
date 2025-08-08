@@ -1,13 +1,14 @@
 import { $ } from "@david/dax";
 import { faker } from "@faker-js/faker";
-import { AccountId, AssetDefinitionId, AssetId, DomainId, KeyPair } from "@iroha/core/data-model";
+import * as iroha from "@iroha/core/data-model";
 import { assert } from "@std/assert";
 import * as fs from "@std/fs";
 import * as path from "@std/path";
 import * as TOML from "@std/toml";
 import * as YAML from "@std/yaml";
+import { JsonValue } from "npm:type-fest@^4.33.0";
 import { z } from "zod";
-import * as uiShared from "../ui/src/shared.ts";
+import { RelayConfigSchema, UiConfigSchema } from "../shared.ts";
 
 const dirname = import.meta.dirname;
 assert(dirname);
@@ -20,9 +21,9 @@ const CHAINS = ["aaa", "bbb", "ccc"];
 const PEERS_ON_CHAIN = 4;
 const ACCOUNTS_ON_CHAIN = 3;
 const ASSETS = [
-  AssetDefinitionId.parse("rose#wonderland"),
-  AssetDefinitionId.parse(`tulip#wonderland`),
-  AssetDefinitionId.parse(`time#wonderland`),
+  iroha.AssetDefinitionId.parse("rose#wonderland"),
+  iroha.AssetDefinitionId.parse(`tulip#wonderland`),
+  iroha.AssetDefinitionId.parse(`time#wonderland`),
 ];
 
 // =============================
@@ -38,11 +39,11 @@ const userAccounts = new Map(CHAINS.map((chain) => {
     Array.from({ length: ACCOUNTS_ON_CHAIN }, () => {
       // FIXME: this is not unique!
       const alias = faker.person.firstName();
-      const key = KeyPair.random();
-      const id = new AccountId(key.publicKey(), new DomainId("wonderland"));
+      const key = iroha.KeyPair.random();
+      const id = new iroha.AccountId(key.publicKey(), new iroha.DomainId("wonderland"));
 
       const initQuantities = ASSETS.map((asset) => ({
-        id: new AssetId(id, asset),
+        id: new iroha.AssetId(id, asset),
         quantity: faker.number.int({ min: 0, max: 1500, multipleOf: 50 }),
       }));
 
@@ -52,30 +53,38 @@ const userAccounts = new Map(CHAINS.map((chain) => {
 }));
 
 const omnibusAccounts = new Map(CHAINS.map(chain => {
-  const key = KeyPair.random();
+  const key = iroha.KeyPair.random();
 
   return [chain, {
     alias: `Omnibus Chain ${chain}`,
-    id: new AccountId(key.publicKey(), new DomainId(`chain_${chain}`)),
+    id: new iroha.AccountId(key.publicKey(), new iroha.DomainId(`chain_${chain}`)),
   }];
 }));
 
 const relayAccounts = new Map(CHAINS.map((chain) => {
-  const key = KeyPair.random();
+  const key = iroha.KeyPair.random();
 
-  return [chain, { alias: `Relay ${chain}`, key, id: new AccountId(key.publicKey(), new DomainId("system")) }];
+  return [chain, {
+    alias: `Relay ${chain}`,
+    key,
+    id: new iroha.AccountId(key.publicKey(), new iroha.DomainId("system")),
+  }];
 }));
 
-const genesisKeys = new Map<ChainId, KeyPair>(([...CHAINS, Hub] as const).map((chain) => [chain, KeyPair.random()]));
-
-const peerKeys = new Map<ChainId, KeyPair[]>(
-  ([...CHAINS, Hub] as const).map(chain => [chain, Array.from({ length: PEERS_ON_CHAIN }, () => KeyPair.random())]),
+const genesisKeys = new Map<ChainId, iroha.KeyPair>(
+  ([...CHAINS, Hub] as const).map((chain) => [chain, iroha.KeyPair.random()]),
 );
 
-const adminKey = KeyPair.random();
+const peerKeys = new Map<ChainId, iroha.KeyPair[]>(
+  ([...CHAINS, Hub] as const).map(
+    chain => [chain, Array.from({ length: PEERS_ON_CHAIN }, () => iroha.KeyPair.random())],
+  ),
+);
+
+const adminKey = iroha.KeyPair.random();
 const admin = {
   key: adminKey,
-  id: AccountId.parse(`${adminKey.publicKey().multihash()}@system`),
+  id: iroha.AccountId.parse(`${adminKey.publicKey().multihash()}@system`),
   alias: "admin",
 };
 
@@ -86,6 +95,7 @@ const sharedConfig = {
   torii: {
     address: "0.0.0.0:8080",
   },
+  logger: { format: "compact" },
 };
 
 function chainToStr(chain: ChainId): string {
@@ -99,17 +109,17 @@ function genesisFor(chain: ChainId) {
   const omnibusTotals = otherChains.flatMap(chain =>
     userAccounts.get(chain)!.flatMap(account =>
       account.initQuantities.map((x) => ({
-        id: new AssetId(omnibusAccounts.get(chain)!.id, x.id.definition),
+        id: new iroha.AssetId(omnibusAccounts.get(chain)!.id, x.id.definition),
         quantity: x.quantity,
       }))
     )
   );
   const omnibusDomains = omnibus.map(x => x.id.domain);
 
-  let registerDomains: (string | DomainId)[];
-  let registerAccounts: { id: AccountId; alias: string }[];
-  let mintAssets: { id: AssetId; quantity: number | string }[];
-  let misc: JsonValue[] = [];
+  let registerDomains: (string | iroha.DomainId)[];
+  let registerAccounts: { id: iroha.AccountId; alias: string }[];
+  let mintAssets: { id: iroha.AssetId; quantity: number | string }[];
+  let transferPermissions: { account: iroha.AccountId; asset: iroha.AssetDefinitionId }[];
 
   if (chain !== Hub) {
     const accounts = userAccounts.get(chain)!;
@@ -127,17 +137,9 @@ function genesisFor(chain: ChainId) {
       ...[...accounts].flatMap((account) => account.initQuantities),
       ...omnibusTotals,
     ];
-
-    misc = ASSETS.map(asset => ({
-      Grant: {
-        Permission: {
-          object: {
-            name: "CanTransferAssetWithDefinition",
-            payload: { asset_definition: asset.toString() },
-          },
-          destination: admin.id.toString(),
-        },
-      },
+    transferPermissions = ASSETS.map(asset => ({
+      asset,
+      account: admin.id,
     }));
   } else {
     const relays = CHAINS.map(x => relayAccounts.get(x)!);
@@ -151,6 +153,12 @@ function genesisFor(chain: ChainId) {
     ];
     registerAccounts = [...omnibus, ...relays, admin];
     mintAssets = omnibusTotals;
+    transferPermissions = ASSETS.flatMap(asset =>
+      relays.map(relay => ({
+        asset,
+        account: relay.id,
+      }))
+    );
   }
 
   const instructions = [
@@ -194,7 +202,17 @@ function genesisFor(chain: ChainId) {
       },
     })),
 
-    ...misc,
+    ...transferPermissions.map(x => ({
+      Grant: {
+        Permission: {
+          object: {
+            name: "CanTransferAssetWithDefinition",
+            payload: { asset_definition: x.asset.toString() },
+          },
+          destination: x.account.toString(),
+        },
+      },
+    })),
   ];
 
   const topology = peerKeys.get(chain)!.map(x => x.publicKey());
@@ -271,6 +289,13 @@ function peerComposeService(chain: ChainId, i: number) {
       ports,
       init: true,
       command,
+      healthcheck: {
+        test: "test $(curl -s http://127.0.0.1:8080/status/blocks) -gt 0",
+        interval: "1s",
+        timeout: "200ms",
+        retries: "10",
+        start_period: "2s",
+      },
     },
   };
 }
@@ -285,15 +310,17 @@ function relayConfigPath(chain: string) {
   return `chain-${chain}-relay.json`;
 }
 
-function relayConfig(chain: string) {
+function relayConfig(chain: string): z.input<typeof RelayConfigSchema> {
   const account = relayAccounts.get(chain)!;
 
   return {
-    account: account.id.toString(),
-    accountPrivateKey: account.key.privateKey().multihash(),
+    authority: account.id.toString(),
+    authorityPrivateKey: account.key.privateKey().multihash(),
     omnibusAccounts: [...omnibusAccounts.values()].map(acc => acc.id.toString()),
+    domesticChainId: chain,
     domesticToriiUrl: `http://${peerServiceId(chain, 0)}:8080`,
     domesticOmnibusAccount: omnibusAccounts.get(chain)!.id.toString(),
+    hubChainId: chainToStr(Hub),
     hubToriiUrl: `http://${peerServiceId(Hub, 0)}:8080`,
   };
 }
@@ -303,18 +330,27 @@ function relayServices() {
     return [`chain_${chain}_relay`, {
       build: {
         context: "..",
-        dockerfile: "Dockerfile.relay",
+        dockerfile: "relay/Dockerfile",
       },
       volumes: [".:/config/relay"],
       environment: {
         RELAY_CONFIG: `/config/relay/${relayConfigPath(chain)}`,
+        DEBUG: "relay",
+      },
+      depends_on: {
+        ...Object.fromEntries([
+          ...peerKeys.get(chain)!.map((_x, i) => [peerServiceId(chain, i), {
+            condition: "healthy",
+            restart: true,
+          }]),
+        ]),
       },
     }];
   }));
 }
 
-function uiConfig(): z.input<typeof uiShared.Config> {
-  type ChainValue = z.input<typeof uiShared.Config>["chains"][string];
+function uiConfig(): z.input<typeof UiConfigSchema> {
+  type ChainValue = z.input<typeof UiConfigSchema>["chains"][string];
 
   return {
     authority: admin.id.toString(),
@@ -354,8 +390,8 @@ function uiService() {
 const dockerCompose = {
   services: {
     ...peerServices(),
+    ...relayServices(),
     // TODO: not ready
-    // ...relayServices(),
     // ui: uiService(),
   },
 };

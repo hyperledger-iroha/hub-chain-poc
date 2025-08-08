@@ -8,10 +8,14 @@
     "@iroha/client": "jsr:@iroha/client@^0.4.0",
     "@iroha/core": "jsr:@iroha/core@^0.4.0",
     "@std/assert": "jsr:@std/assert@^1.0.13",
+    "@std/async": "jsr:@std/async@^1.0.14",
     "@std/fs": "jsr:@std/fs@^1.0.19",
     "@std/path": "jsr:@std/path@^1.1.1",
     "@std/toml": "jsr:@std/toml@^1.0.8",
     "@std/yaml": "jsr:@std/yaml@^1.0.9",
+    "debug": "npm:debug@^4.4.1",
+    "true-myth": "npm:true-myth@^9.0.1",
+    "ts-pattern": "npm:ts-pattern@^5.8.0",
     "zod": "npm:zod@^4.0.15",
   }
 }

@@ -1,12 +1,12 @@
 import { Client } from "@iroha/client";
-import { Account, Asset, AssetDefinitionId } from "@iroha/core/data-model";
+import { Account, Asset, AssetDefinitionId, BlockStatus, EventFilterBox } from "@iroha/core/data-model";
 import { type PromiseStateAtomic, useParamScope, useTask } from "@vue-kakuyaku/core";
 import { match } from "ts-pattern";
 import { type Ref, toRef } from "vue";
 import CONFIG from "../../config/ui.json" with { type: "json" };
-import { Config } from "./shared.ts";
+import { UiConfigSchema } from "../../shared.ts";
 
-const config = Config.parse(CONFIG);
+const config = UiConfigSchema.parse(CONFIG);
 const chainsArray = Object.entries(config.chains).map(([chain, x]) => ({ chain, ...x }));
 
 export function clientFor(chain: string): Client {
@@ -53,7 +53,12 @@ type ChainConnection = {
 function useChainConnection(client: Client): ChainConnection {
   const { data, reload } = useChainData(client);
 
-  const events = useTask(() => client.events(), { immediate: true });
+  const events = useTask(() =>
+    client.events({
+      filters: [
+        EventFilterBox.Pipeline.Block({ status: BlockStatus.Applied, height: null }),
+      ],
+    }), { immediate: true });
 
   useParamScope(() => !!events.state.fulfilled, () => {
     const { ee } = events.state.fulfilled!.value;
@@ -61,9 +66,7 @@ function useChainConnection(client: Client): ChainConnection {
     console.log("events");
 
     ee.on("event", (event) => {
-      console.log("wtf event!");
-      console.debug("event", event);
-
+      console.log("event", event);
       match(event)
         .with({ kind: "Pipeline", value: { kind: "Block", value: { status: { kind: "Applied" } } } }, () => {
           reload();
