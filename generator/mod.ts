@@ -95,7 +95,7 @@ const sharedConfig = {
   torii: {
     address: "0.0.0.0:8080",
   },
-  logger: { format: "compact" },
+  logger: { format: "pretty", filter: "iroha_core=debug" },
 };
 
 function chainToStr(chain: ChainId): string {
@@ -137,10 +137,12 @@ function genesisFor(chain: ChainId) {
       ...[...accounts].flatMap((account) => account.initQuantities),
       ...omnibusTotals,
     ];
-    transferPermissions = ASSETS.map(asset => ({
-      asset,
-      account: admin.id,
-    }));
+    transferPermissions = ASSETS.flatMap(asset =>
+      [admin, relay].map(acc => ({
+        asset,
+        account: acc.id,
+      }))
+    );
   } else {
     const relays = CHAINS.map(x => relayAccounts.get(x)!);
 
@@ -224,6 +226,13 @@ function genesisFor(chain: ChainId) {
     wasm_dir: "PLACEHOLDER",
     wasm_triggers: [],
     topology,
+    "parameters": {
+      "sumeragi": {
+        "block_time_ms": 500,
+        "commit_time_ms": 1000,
+        "max_clock_drift_ms": 1000,
+      },
+    },
   };
 }
 
@@ -257,6 +266,7 @@ function peerComposeService(chain: ChainId, i: number) {
     GENESIS_PUBLIC_KEY: genesisKey.publicKey().multihash(),
     P2P_PUBLIC_ADDRESS: `${id}:1337`,
     TRUSTED_PEERS: trustedPeers,
+    TERMINAL_COLORS: "true",
   };
 
   const isGenesis = i === 0;
