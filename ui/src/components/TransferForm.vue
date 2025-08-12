@@ -74,7 +74,7 @@ const submit = useTask(async () => {
   await client.transaction(
     Executable.Instructions([InstructionBox.Transfer.Asset(data.value)]),
     { metadata: data.metadata },
-  ).submit({ verify: true });
+  ).submit({ verify: false });
 });
 
 function formatErr(err: unknown) {

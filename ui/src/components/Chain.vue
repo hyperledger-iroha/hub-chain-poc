@@ -4,6 +4,7 @@ import invariant from "tiny-invariant";
 import { maybe } from "true-myth";
 import { computed } from "vue";
 import state from "../state";
+import { displayEvent } from "../utils";
 import VAccountId from "./VAccountId.vue";
 import VNumberChange from "./VNumberChange.vue";
 
@@ -58,9 +59,15 @@ function accountMeta(account: AccountId): Metadata {
   <div class="border-1 border-solid border-gray-400 p-2">
     <h2 class="mt-0 mb-4 text-center">Chain <i>{{ chain }}</i></h2>
 
-    <div class="flex gap-2 items-start">
+    <div class="flex gap-4">
+      <TransitionGroup tag="div" name="log" class="w-60 flex flex-col overflow-auto max-h-40">
+        <span v-for="x in chainState.log.value" :key="x.i">
+          {{ displayEvent(x.event) }}
+        </span>
+      </TransitionGroup>
+
       <template v-if="assetsGrouped.isJust">
-        <table v-for="group in assetsGrouped.value">
+        <table class="assets" v-for="group in assetsGrouped.value">
           <caption>Asset <i>{{ group.asset.id.toString() }}</i></caption>
 
           <thead>
@@ -110,7 +117,24 @@ function accountMeta(account: AccountId): Metadata {
 </template>
 
 <style scoped lang="scss">
-td, th {
-  text-align: center;
+table.log {
+  width: 230px;
+}
+
+table.assets {
+  td, th {
+    text-align: center;
+  }
+}
+
+.log {
+  &-enter-active {
+    transition: all 0.5s ease;
+  }
+
+  &-enter-from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
 }
 </style>

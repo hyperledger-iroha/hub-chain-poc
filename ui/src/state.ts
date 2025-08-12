@@ -5,12 +5,14 @@ import {
   AssetDefinition,
   AssetDefinitionId,
   BlockStatus,
+  EventBox,
   EventFilterBox,
 } from "@iroha/core/data-model";
 import { type PromiseStaleState, useParamScope, useStaleState, useTask } from "@vue-kakuyaku/core";
 import { useLocalStorage } from "@vueuse/core";
+import RingBuffer from "ringbufferjs";
 import { match } from "ts-pattern";
-import { reactive, type Ref, toRef } from "vue";
+import { computed, reactive, type Ref, toRef } from "vue";
 import CONFIG from "../../config/ui.json" with { type: "json" };
 import { UiConfigSchema } from "../shared.ts";
 
@@ -56,10 +58,14 @@ function useChainData(client: Client): ChainData {
 }
 
 type ChainConnection = {
-  // logs: string[];
   connected: Ref<boolean>;
   data: ChainData["data"];
+  log: Ref<Log[]>;
 };
+
+type Log = { event: EventBox; i: number };
+
+const LOGS_BUFFER = 50;
 
 function useChainConnection(client: Client): ChainConnection {
   const { data, reload } = useChainData(client);
@@ -67,21 +73,24 @@ function useChainConnection(client: Client): ChainConnection {
   const events = useTask(() =>
     client.events({
       filters: [
-        EventFilterBox.Pipeline.Block({ status: BlockStatus.Applied, height: null }),
+        EventFilterBox.Pipeline.Block({ status: null, height: null }),
       ],
     }), { immediate: true });
+
+  let logCounter = 0;
+  const log = reactive(new RingBuffer<Log>(LOGS_BUFFER));
 
   useParamScope(() => !!events.state.fulfilled, () => {
     const { ee } = events.state.fulfilled!.value;
 
-    console.log("events");
-
     ee.on("event", (event) => {
       console.log("event", event);
+      log.enq({ i: logCounter++, event });
       match(event)
         .with({ kind: "Pipeline", value: { kind: "Block", value: { status: { kind: "Applied" } } } }, () => {
           reload();
         }).otherwise(() => {
+          // do nothing
         });
     });
   });
@@ -89,6 +98,7 @@ function useChainConnection(client: Client): ChainConnection {
   return {
     connected: toRef(() => !!events.state.fulfilled),
     data,
+    log: computed(() => log.peekN(log.size()).toReversed()),
   };
 }
 type FormFields = {
