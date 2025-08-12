@@ -8,7 +8,7 @@ import * as TOML from "@std/toml";
 import * as YAML from "@std/yaml";
 import { JsonValue } from "npm:type-fest@^4.33.0";
 import { z } from "zod";
-import { RelayConfigSchema, UiConfigSchema } from "../shared.ts";
+import { RelayConfigSchema, UiConfigSchema } from "../ui/shared.ts";
 
 const dirname = import.meta.dirname;
 assert(dirname);

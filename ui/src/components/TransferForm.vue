@@ -13,10 +13,9 @@ import {
   Transfer,
 } from "@iroha/core/data-model";
 import { useTask } from "@vue-kakuyaku/core";
-import { useLocalStorage } from "@vueuse/core";
 import invariant from "tiny-invariant";
-import { computed, reactive } from "vue";
-import { clientFor } from "../state";
+import { computed } from "vue";
+import state, { clientFor } from "../state";
 import PromiseState from "./PromiseState.vue";
 
 const props = defineProps<{
@@ -28,23 +27,7 @@ const props = defineProps<{
   assets: AssetDefinitionId[];
 }>();
 
-const allAccounts = computed(() =>
-  props.chains.flatMap(x => x.users.map(y => ({ chain: x.chain, account: y })))
-);
-
-type FormFields = {
-  from: string;
-  to: string;
-  assetId: string;
-  quantity: number;
-};
-
-const form: { [x in keyof FormFields]: FormFields[x] | null } = reactive({
-  from: useLocalStorage<null | string>("transfer-from", null),
-  to: useLocalStorage<null | string>("transfer-to", null),
-  assetId: useLocalStorage<null | string>("transfer-asset-id", null),
-  quantity: null,
-});
+const allAccounts = computed(() => props.chains.flatMap(x => x.users.map(y => ({ chain: x.chain, account: y }))));
 
 function findChainOfAccount(account: string): string {
   return props.chains.find(x => x.users.some(y => y.id.toString() === account))!
@@ -59,25 +42,24 @@ const transfer = computed<
   }
 >(
   () => {
-    if (!(form.from && form.to && form.assetId && form.quantity)) return null;
+    if (!(state.form.from && state.form.to && state.form.assetId && state.form.quantity)) return null;
 
-    const sourceChain = findChainOfAccount(form.from);
-    const targetChain = findChainOfAccount(form.to);
+    const sourceChain = findChainOfAccount(state.form.from);
+    const targetChain = findChainOfAccount(state.form.to);
 
     const source = new AssetId(
-      AccountId.parse(form.from),
-      AssetDefinitionId.parse(form.assetId),
+      AccountId.parse(state.form.from),
+      AssetDefinitionId.parse(state.form.assetId),
     );
-    const object: Numeric = { mantissa: BigInt(form.quantity), scale: 0n };
-    const destination =
-      props.chains.find(x => x.chain === targetChain)!.omnibus;
+    const object: Numeric = { mantissa: BigInt(state.form.quantity), scale: 0n };
+    const destination = props.chains.find(x => x.chain === targetChain)!.omnibus;
 
     return {
       chain: sourceChain,
       value: { source, object, destination },
       metadata: [{
         key: new Name("destination"),
-        value: Json.fromValue(form.to),
+        value: Json.fromValue(state.form.to),
       }],
     };
   },
@@ -108,31 +90,31 @@ function formatErr(err: unknown) {
     <h2 class="mt-0 text-center">Transfer</h2>
 
     <div class="flex flex-col gap-2 fields">
-      <span>
+      <span class="bg-yellow-300">
         <label>From:</label>
-        <select v-model="form.from">
+        <select v-model="state.form.from">
           <option v-for="x in allAccounts" :value="x.account.id.toString()">
             [{{ x.chain }}] {{ x.account.alias }}
           </option>
         </select>
       </span>
 
-      <span><label>To:</label>
-        <select v-model="form.to">
+      <span class="bg-indigo-300"><label>To:</label>
+        <select v-model="state.form.to">
           <option v-for="x in allAccounts" :value="x.account.id.toString()">
             [{{ x.chain }}] {{ x.account.alias }}
           </option>
         </select></span>
 
-      <span><label>Asset:</label>
-        <select v-model="form.assetId">
+      <span class=""><label>Asset:</label>
+        <select v-model="state.form.assetId">
           <option v-for="x in assets" :value="x.toString()">
             {{ x.toString() }}
           </option>
         </select></span>
 
       <span><label>Quantity:</label>
-        <input type="number" v-model="form.quantity"></span>
+        <input type="number" v-model="state.form.quantity"></span>
     </div>
     <button :disabled="!canSubmit" @click="submit.run()">
       Submit

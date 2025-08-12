@@ -1,10 +1,18 @@
 import { Client } from "@iroha/client";
-import { Account, Asset, AssetDefinitionId, BlockStatus, EventFilterBox } from "@iroha/core/data-model";
-import { type PromiseStateAtomic, useParamScope, useTask } from "@vue-kakuyaku/core";
+import {
+  Account,
+  Asset,
+  AssetDefinition,
+  AssetDefinitionId,
+  BlockStatus,
+  EventFilterBox,
+} from "@iroha/core/data-model";
+import { type PromiseStaleState, useParamScope, useStaleState, useTask } from "@vue-kakuyaku/core";
+import { useLocalStorage } from "@vueuse/core";
 import { match } from "ts-pattern";
-import { type Ref, toRef } from "vue";
+import { reactive, type Ref, toRef } from "vue";
 import CONFIG from "../../config/ui.json" with { type: "json" };
-import { UiConfigSchema } from "../../shared.ts";
+import { UiConfigSchema } from "../shared.ts";
 
 const config = UiConfigSchema.parse(CONFIG);
 const chainsArray = Object.entries(config.chains).map(([chain, x]) => ({ chain, ...x }));
@@ -27,21 +35,24 @@ export function domesticChains() {
 }
 
 type ChainData = {
-  data: PromiseStateAtomic<{ accounts: Account[]; assets: Asset[] }>;
+  data: PromiseStaleState<{ accounts: Account[]; assets: Asset[]; assetDefinitions: AssetDefinition[] }>;
   reload: () => void;
 };
 
 function useChainData(client: Client): ChainData {
   const task = useTask(async () => {
-    const [accounts, assets] = await Promise.all([
+    const [accounts, defs, assets] = await Promise.all([
       client.find.accounts().executeAll(),
+      client.find.assetsDefinitions().executeAll(),
       client.find.assets().executeAll(),
     ]);
 
-    return { accounts, assets };
+    return { accounts, assets, assetDefinitions: defs };
   }, { immediate: true });
 
-  return { data: task.state, reload: task.run };
+  const stale = useStaleState(task.state);
+
+  return { data: stale, reload: task.run };
 }
 
 type ChainConnection = {
@@ -80,6 +91,23 @@ function useChainConnection(client: Client): ChainConnection {
     data,
   };
 }
+type FormFields = {
+  from: string;
+  to: string;
+  assetId: string;
+  quantity: number;
+};
+
+function useTransferForm() {
+  const form: { [x in keyof FormFields]: FormFields[x] | null } = reactive({
+    from: useLocalStorage<null | string>("transfer-from", null),
+    to: useLocalStorage<null | string>("transfer-to", null),
+    assetId: useLocalStorage<null | string>("transfer-asset-id", null),
+    quantity: null,
+  });
+
+  return { form };
+}
 
 function useState() {
   const chains = Object.keys(config.chains).map((chain) => {
@@ -88,7 +116,9 @@ function useState() {
     return { chain, ...conn };
   });
 
-  return { chains };
+  const { form } = useTransferForm();
+
+  return { chains, form };
 }
 
 const state = useState();
