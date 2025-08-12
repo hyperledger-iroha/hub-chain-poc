@@ -7,12 +7,14 @@ const props = defineProps<{
   value: number;
 }>();
 
-const animation = useDeferredScope<
-  { display: Ref<number>; change: "pos" | "neg"; blink: Ref<boolean> }
->();
-
 const DURATION_CHANGE = 1500;
 const DURATION_BLINK = 2500;
+
+const animation = useDeferredScope<{
+  display: Ref<number>;
+  diff: number;
+  blink: Ref<boolean>;
+}>();
 
 watch(() => props.value, (val, prev) => {
   const diff = val - prev;
@@ -37,24 +39,35 @@ watch(() => props.value, (val, prev) => {
       immediate: true,
     });
 
-    return { display, blink, change: diff > 0 ? "pos" : "neg" };
+    return { display, blink, diff };
   });
 });
 
 const display = computed(() => animation.scope.value?.expose.display.value ?? props.value);
 const blink = computed<boolean>(() => animation.scope.value?.expose.blink.value ?? false);
-const change = computed(() => animation.scope.value?.expose.change);
+const diff = computed(() => animation.scope.value?.expose.diff ?? 0);
 </script>
 
 <template>
-  <span
-    :class="{
-      'bg-green-700 text-white': change === 'pos',
-      'bg-rose-700 text-white': change === 'neg',
-      blink,
-    }"
-  >
-    {{ display }}
+  <span class="relative">
+    <span
+      :class="{
+        green: diff > 0,
+        red: diff < 0,
+        blink,
+      }"
+    >
+      {{ display }}
+    </span>
+
+    <span
+      class="diff"
+      :class="{
+        green: diff > 0,
+        red: diff < 0,
+      }"
+      v-if="diff !== 0"
+    >{{ diff > 0 ? `+${diff}` : diff }}</span>
   </span>
 </template>
 
@@ -68,7 +81,27 @@ const change = computed(() => animation.scope.value?.expose.change);
   }
 }
 
+.green {
+  color: white;
+  background: oklch(52.7% 0.154 150.069);
+}
+
+.red {
+  color: white;
+  background: oklch(51.4% 0.222 16.935);
+}
+
 .blink {
   animation: 0.3s steps(1, end) infinite animation-blink;
+}
+
+.diff {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 100%;
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.16), 0 3px 6px rgba(0, 0, 0, 0.23);
+  padding: 2px;
+  margin: -2px;
 }
 </style>
