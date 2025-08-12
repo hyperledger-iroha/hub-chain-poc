@@ -49,6 +49,7 @@ async function listenDomestic() {
   }
 }
 
+// FIXME: should forward omnibus account transfers
 async function listenHub() {
   for await (const tx of interceptTransactions(clients.hub)) {
     const transfer = findTransfer(tx);
@@ -96,7 +97,6 @@ async function* interceptTransactions(client: Client): AsyncGenerator<iroha.Sign
           event.kind === "Pipeline" && event.value.kind === "Block" && event.value.value.status.kind === "Applied",
           "Bad filter",
         );
-        const height = event.value.value.header.height.value;
         const hash = blockHash(event.value.value.header);
 
         const block = await client.find.blocks()
