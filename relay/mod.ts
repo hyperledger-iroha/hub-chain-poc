@@ -7,7 +7,7 @@ import Debug from "debug";
 import * as tm from "true-myth";
 import { match, P } from "ts-pattern";
 import { z } from "zod";
-import { RelayConfigSchema } from "../shared.ts";
+import { RelayConfigSchema } from "../ui/shared.ts";
 
 const dbg = Debug("relay");
 
@@ -49,7 +49,6 @@ async function listenDomestic() {
   }
 }
 
-// FIXME: should forward omnibus account transfers
 async function listenHub() {
   for await (const tx of interceptTransactions(clients.hub)) {
     const transfer = findTransfer(tx);
@@ -166,22 +165,37 @@ function forwardTransferToHub({ transfer, destination }: Transfer): tm.Task<void
  * Forward a transfer that happened on the hub chain:
  *
  * - From the source chain omnibus account
- * - To domestic chain omnibus account
+ * - To the target chain omnibus account
  * - With destination account on the domestic chain in metadata
  *
- * as a transfer on the domestic, _target_ chain:
+ * as a transfer on the domestic chain. There are two cases:
  *
- * - From the source chain omnibus account
- * - To the destination account
+ * 1. Domestic chain is the target chain. Then, create a transfer from the source chain omnibus account
+ *    to the final destination account.
+ * 2. Domestic chain is neither the target nor the source chain. Then, simply replicate the transfer between
+ *    the omnibus accounts of the respective chains (to maintain totals).
  */
 function forwardTransferToDomestic({ transfer, destination }: Transfer): tm.Task<void, unknown> {
-  return tm.task.safelyTry(() =>
-    clients.domestic.transaction(
-      iroha.Executable.Instructions([iroha.InstructionBox.Transfer.Asset({
+  return tm.task.safelyTry(async () => {
+    const isSource = transfer.source.account.compare(config.domesticOmnibusAccount) === 0;
+    const isTarget = transfer.destination.compare(config.domesticOmnibusAccount) === 0;
+
+    let instruction: iroha.InstructionBox;
+
+    if (isTarget) {
+      instruction = iroha.InstructionBox.Transfer.Asset({
         object: transfer.object,
         source: transfer.source,
         destination: iroha.AccountId.parse(z.string().parse(destination.value.asValue())),
-      })]),
-    ).submit({ verify: true })
-  );
+      });
+    } else if (!isSource) {
+      instruction = iroha.InstructionBox.Transfer.Asset({
+        object: transfer.object,
+        source: transfer.source,
+        destination: transfer.destination,
+      });
+    } else return;
+
+    await clients.domestic.transaction(iroha.Executable.Instructions([instruction])).submit({ verify: true });
+  });
 }

@@ -1,3 +1,7 @@
+// NOTE: This file contains stuff related not only to UI, but also to relay
+//       The problem is that Vite won't discover `zod` from outside the `ui` directory
+//       Ugly, I know...
+
 import { AccountId, AssetDefinitionId, PrivateKey } from "@iroha/core/data-model";
 import { z } from "zod";
 

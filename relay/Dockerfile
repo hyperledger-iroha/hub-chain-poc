@@ -3,5 +3,5 @@ WORKDIR /app
 COPY deno.* .
 RUN deno install
 COPY relay relay
-COPY shared.ts .
+COPY ui/shared.ts ui/
 CMD ["deno", "run", "-A", "./relay/mod.ts"]
