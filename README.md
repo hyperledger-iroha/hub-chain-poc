@@ -11,6 +11,37 @@ The transfer is split in two steps:
 
 Each step involves a **prover** (source chain) and a **verifier** (target chain). However, for now we will be implementing a simple flow without proofs.
 
+## Running the demo
+
+Prerequisites:
+
+- [Deno installed](https://deno.com/) (version 2+) (shortcut: `curl -fsSL https://deno.land/install.sh | sh`)
+- Docker Compose (or Podman)
+
+#### 1. Generate configuration
+
+```sh
+deno task generate
+```
+
+This will generate `config` directory, where you can see/inspect all of the configuration for the PoC: compose file, genesis files, etc.
+
+#### 2. Run
+
+```sh
+docker-compose -f config/docker-compose.yml up
+```
+
+This will spin up everything.
+
+#### 3. Open UI in the browser
+
+Open your browser at http://localhost:9900
+
+#### Troubleshooting
+
+- Make sure you don't have occupied ports at 8080-8090 and 9900
+
 ## Stage 1 _(you are here)_: No-proof
 
 In this version, there is no prover-verifier mechanism. Cross-chain transfers are done by the trusted relays.
