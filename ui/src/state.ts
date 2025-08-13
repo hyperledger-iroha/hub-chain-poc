@@ -1,13 +1,5 @@
 import { Client } from "@iroha/client";
-import {
-  Account,
-  Asset,
-  AssetDefinition,
-  AssetDefinitionId,
-  BlockStatus,
-  EventBox,
-  EventFilterBox,
-} from "@iroha/core/data-model";
+import { Account, Asset, AssetDefinition, AssetDefinitionId, EventBox, EventFilterBox } from "@iroha/core/data-model";
 import { type PromiseStaleState, useParamScope, useStaleState, useTask } from "@vue-kakuyaku/core";
 import { useLocalStorage } from "@vueuse/core";
 import RingBuffer from "ringbufferjs";

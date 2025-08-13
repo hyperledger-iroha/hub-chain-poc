@@ -390,10 +390,7 @@ function uiConfig(): z.input<typeof UiConfigSchema> {
 function uiService() {
   return {
     build: { context: "..", dockerfile: "ui/Dockerfile" },
-    volumes: [".:/config"],
-    environment: {
-      UI_CONFIG: "/config/ui.json",
-    },
+    ports: ["9900:8000"],
   };
 }
 
@@ -401,8 +398,7 @@ const dockerCompose = {
   services: {
     ...peerServices(),
     ...relayServices(),
-    // TODO: not ready
-    // ui: uiService(),
+    ui: uiService(),
   },
 };
 
