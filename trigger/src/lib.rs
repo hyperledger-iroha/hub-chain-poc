@@ -29,7 +29,7 @@ struct Config {
     ///
     /// Alters the behaviour of how transfers are made upon verification.
     mode: OperationMode,
-    /// Storage with admin-only write access. Contains [`ChainSnapshot`]\(s).
+    /// Storage with admin-only write access. Contains [`Checkpoint`]\(s).
     ///
     /// The trigger is deployed separately for each connected chain. Thus, there is
     /// only one trigger on each domestic chain (domestic-hub), and many triggers
@@ -37,7 +37,7 @@ struct Config {
     /// a single admin storage to store multiple chain snapshots. We deploy a separate
     /// trigger for each chain working with its own entry in the admin store.
     admin_store: NftId,
-    /// Points to the exact key in the admin storage containing [`ChainSnapshot`]
+    /// Points to the exact key in the admin storage containing [`Checkpoint`]
     /// for this trigger to work with.
     admin_store_chain_key: Name,
     /// Storage to which the relay has write access. Contains [`RelayBlockMessage`].
@@ -69,9 +69,9 @@ struct ChainConfig {
 /// Message provided by an untrusted relay that the trigger is going to verify
 #[derive(Deserialize)]
 struct RelayBlockMessage {
-    /// Header of the new block. Must be consequent to the block in [`ChainSnapshot`].
+    /// Header of the new block. Must be consequent to the block in [`Checkpoint`].
     header: BlockHeader,
-    /// Block signatures. Will be verified against validators set in [`ChainSnapshot`].
+    /// Block signatures. Will be verified against validators set in [`Checkpoint`].
     signatures: BTreeSet<SignatureOf<BlockHeader>>,
     /// _Interesting_ transactions in the given block.
     ///
@@ -87,7 +87,7 @@ struct RelayBlockMessage {
 
 /// Memory about a chain.
 #[derive(Deserialize, Serialize)]
-struct ChainSnapshot {
+struct Checkpoint {
     /// Must be set in the beginning
     validators: BTreeSet<PublicKey>,
     /// None in the beginning
@@ -108,7 +108,7 @@ fn main_result(host: Iroha, ctx: Context) -> Result<()> {
     // TODO: verify authority?
 
     let config = Config::read(&host, &ctx)?;
-    let mut snapshot = ChainSnapshot::read(&host, &config)?;
+    let mut snapshot = Checkpoint::read(&host, &config)?;
     let Some(message) = RelayBlockMessage::read(&host, &config)? else {
         info!("No messages found, exiting");
         return Ok(());
@@ -152,7 +152,7 @@ impl Config {
     }
 }
 
-impl ChainSnapshot {
+impl Checkpoint {
     fn read(host: &Iroha, config: &Config) -> Result<Self> {
         let value = host
             .query(FindNfts)
@@ -191,10 +191,7 @@ impl RelayBlockMessage {
     }
 }
 
-fn check_block_height(
-    chain: &ChainSnapshot,
-    message: &RelayBlockMessage,
-) -> Result<ControlFlow<()>> {
+fn check_block_height(chain: &Checkpoint, message: &RelayBlockMessage) -> Result<ControlFlow<()>> {
     let snapshot_height = chain.block.map(|x| x.height().get()).unwrap_or(0);
     let msg_height = message.header.height().get();
 
@@ -209,7 +206,7 @@ fn check_block_height(
     }
 }
 
-fn validate_prev_block_hash(chain: &ChainSnapshot, message: &RelayBlockMessage) -> Result<()> {
+fn validate_prev_block_hash(chain: &Checkpoint, message: &RelayBlockMessage) -> Result<()> {
     let expected = chain.block.map(|x| x.hash());
     let actual = message.header.prev_block_hash();
 
@@ -220,7 +217,7 @@ fn validate_prev_block_hash(chain: &ChainSnapshot, message: &RelayBlockMessage) 
     Ok(())
 }
 
-fn validate_block_signatures(chain: &ChainSnapshot, message: &RelayBlockMessage) -> Result<()> {
+fn validate_block_signatures(chain: &Checkpoint, message: &RelayBlockMessage) -> Result<()> {
     if message.signatures.is_empty() {
         bail!("No signatures")
     }
@@ -256,7 +253,7 @@ fn process_transactions(
     host: &Iroha,
     config: &Config,
     message: &RelayBlockMessage,
-    chain: &mut ChainSnapshot,
+    chain: &mut Checkpoint,
 ) -> Result<()> {
     let block_merkle_root = message
         .header
