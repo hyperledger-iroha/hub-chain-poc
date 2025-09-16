@@ -5,23 +5,30 @@ extern crate alloc;
 #[cfg(not(test))]
 extern crate panic_halt;
 
+use core::marker::PhantomData;
 use core::ops::ControlFlow;
+use core::str::FromStr as _;
 
 use alloc::borrow::ToOwned;
 use alloc::collections::btree_map::BTreeMap;
 use alloc::collections::btree_set::BTreeSet;
+use alloc::string::String;
 use alloc::vec::Vec;
 
+use anyhow::{Context as _, Result, anyhow, bail};
 use dlmalloc::GlobalDlmalloc;
-use eyre::{Context as _, OptionExt as _, Result, bail, eyre};
 use iroha_crypto::SignatureOf;
 use iroha_trigger::data_model::block::BlockHeader;
 use iroha_trigger::log::*;
 use iroha_trigger::prelude::*;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 #[global_allocator]
 static ALLOC: GlobalDlmalloc = GlobalDlmalloc;
+
+/// The key from which the trigger will read its config in its own metadata.
+const SELF_CONFIG_KEY: &str = "config";
 
 #[derive(Deserialize)]
 struct Config {
@@ -29,24 +36,32 @@ struct Config {
     ///
     /// Alters the behaviour of how transfers are made upon verification.
     mode: OperationMode,
-    /// Storage with admin-only write access. Contains [`Checkpoint`]\(s).
-    ///
-    /// The trigger is deployed separately for each connected chain. Thus, there is
-    /// only one trigger on each domestic chain (domestic-hub), and many triggers
-    /// on the hub chain (hub-\*domestic). Therefore, on the hub chain, we use
-    /// a single admin storage to store multiple chain snapshots. We deploy a separate
-    /// trigger for each chain working with its own entry in the admin store.
-    admin_store: NftId,
-    /// Points to the exact key in the admin storage containing [`Checkpoint`]
-    /// for this trigger to work with.
-    admin_store_chain_key: Name,
+    /// Storage with admin-only write access. Contains the [`Checkpoint`] this trigger works with.
+    checkpoint_addr: KeyValueAddress<Checkpoint>,
     /// Storage to which the relay has write access. Contains [`RelayBlockMessage`].
-    relay_store: NftId,
-    /// Points to the exact key in the relay storage containing [`RelayBlockMessage`]
-    /// this trigger will read.
-    relay_store_message_key: Name,
+    block_message_addr: KeyValueAddress<RelayBlockMessage>,
     /// Global information about all the chains in the hub chain network.
     chains: BTreeMap<ChainId, ChainConfig>,
+}
+
+/// Generic address in an on-chain key-value storage (metadata) pointing to a specific metadata
+/// key.
+#[derive(Deserialize)]
+struct KeyValueAddress<T> {
+    /// What entity to look in for metadata
+    entity: KeyValueAddressEntity,
+    /// Metadata key
+    key: Name,
+    _value: PhantomData<T>,
+}
+
+#[derive(Deserialize)]
+enum KeyValueAddressEntity {
+    Domain(DomainId),
+    Account(AccountId),
+    AssetDefinition(AssetDefinitionId),
+    Nft(NftId),
+    Trigger(TriggerId),
 }
 
 /// Trigger operation mode
@@ -54,9 +69,16 @@ struct Config {
 #[serde(tag = "type")]
 enum OperationMode {
     /// Trigger is deployed on the hub chain
-    Hub,
+    Hub {
+        /// The chain id this trigger works with. (i.e. whose [`Checkpoint`] it tracks)
+        domestic_chain: ChainId,
+        approved_transfers_addr: KeyValueAddress<HubChainTransferPayload>,
+    },
     /// Trigger is deployed on a domestic chain
-    Domestic(ChainId),
+    Domestic {
+        /// Which domestic chain
+        chain: ChainId,
+    },
 }
 
 /// Information about a specific chain
@@ -94,6 +116,18 @@ struct Checkpoint {
     block: Option<BlockHeader>,
 }
 
+/// Since the trigger on hub chain cannot "show" the transfer as a [`Transfer`] itself,
+/// we have to use a JSON payload and set it as a metadata somewhere.
+#[derive(Serialize, Deserialize, Debug)]
+struct HubChainTransferPayload {
+    source_chain: ChainId,
+    source_account: AccountId,
+    destination_chain: ChainId,
+    destination_account: AccountId,
+    asset: AssetDefinitionId,
+    object: Numeric,
+}
+
 #[iroha_trigger::main]
 fn main(host: Iroha, ctx: Context) {
     main_result(host, ctx).unwrap();
@@ -107,14 +141,22 @@ fn main_result(host: Iroha, ctx: Context) -> Result<()> {
     }
     // TODO: verify authority?
 
-    let config = Config::read(&host, &ctx)?;
-    let mut snapshot = Checkpoint::read(&host, &config)?;
-    let Some(message) = RelayBlockMessage::read(&host, &config)? else {
+    let config: Config = KeyValueAddress::new(
+        KeyValueAddressEntity::Trigger(ctx.id.to_owned()),
+        ctx.id.name().to_owned(),
+    )
+    .read(&host)?
+    .ok_or_else(|| anyhow!("cannot find config"))?;
+    let mut checkpoint = config
+        .checkpoint_addr
+        .read(&host)?
+        .ok_or_else(|| anyhow!("cannot find checkpoint"))?;
+    let Some(message) = config.block_message_addr.read(&host)? else {
         info!("No messages found, exiting");
         return Ok(());
     };
 
-    match check_block_height(&snapshot, &message)? {
+    match check_block_height(&checkpoint, &message)? {
         ControlFlow::Break(()) => {
             info!("No updates detected, exiting");
             return Ok(());
@@ -124,75 +166,80 @@ fn main_result(host: Iroha, ctx: Context) -> Result<()> {
         }
     }
 
-    validate_prev_block_hash(&snapshot, &message)?;
-    validate_block_signatures(&snapshot, &message)?;
-    process_transactions(&host, &config, &message, &mut snapshot)?;
-    snapshot.write(&host, &config)?;
+    validate_prev_block_hash(&checkpoint, &message)?;
+    validate_block_signatures(&checkpoint, &message)?;
+    process_transactions(&host, &config, &message)?;
+
+    checkpoint.block = Some(message.header);
+    config.checkpoint_addr.write(&host, &checkpoint)?;
 
     info!("Trigger completed successfully!");
     Ok(())
 }
 
 impl Config {
-    fn read(host: &Iroha, ctx: &Context) -> Result<Self> {
-        let meta = host
-            .query(FindTriggers)
-            .filter_with(|x| x.id.eq(ctx.id.to_owned()))
-            .select_with(|x| x.action.metadata)
-            .execute_single()
-            .map_err(|err| eyre!("failed query: {err}"))?;
+    fn chain_by_omnibus_account(&self, account: &AccountId) -> Option<&ChainId> {
+        self.chains
+            .iter()
+            .find(|(_, x)| &x.omnibus_account == account)
+            .map(|(chain, _)| chain)
+    }
 
-        let config = meta
-            .get("config")
-            .ok_or_eyre("cannot find config in trigger metadata")?
-            .try_into_any()
-            .wrap_err("cannot deserialize config")?;
-
-        Ok(config)
+    fn omnibus_account_by_chain(&self, chain: &ChainId) -> Option<&AccountId> {
+        self.chains.get(chain).map(|x| &x.omnibus_account)
     }
 }
 
-impl Checkpoint {
-    fn read(host: &Iroha, config: &Config) -> Result<Self> {
-        let value = host
-            .query(FindNfts)
-            .filter_with(|x| x.id.eq(config.admin_store.to_owned()))
-            .select_with(|x| x.content.key(config.admin_store_chain_key.to_owned()))
-            .execute_single()
-            .map_err(|err| eyre!("failed query: {err}"))?
-            .try_into_any()
-            .wrap_err("cannot deserialize chain snapshot")?;
-
-        Ok(value)
-    }
-
-    fn write(&self, host: &Iroha, config: &Config) -> Result<()> {
-        host.submit(&SetKeyValue::nft(
-            config.admin_store.to_owned(),
-            config.admin_store_chain_key.to_owned(),
-            Json::new(&self),
-        ))
-        .map_err(|err| eyre!("failed tx: {err}"))
+impl<T> KeyValueAddress<T> {
+    fn new(entity: KeyValueAddressEntity, key: impl Into<Name>) -> Self {
+        Self {
+            entity,
+            key: key.into(),
+            _value: <_>::default(),
+        }
     }
 }
 
-impl RelayBlockMessage {
-    fn read(host: &Iroha, config: &Config) -> Result<Option<Self>> {
-        let value = host
-            .query(FindNfts)
-            .filter_with(|x| x.id.eq(config.relay_store.to_owned()))
-            .select_with(|x| x.content.key(config.relay_store_message_key.to_owned()))
-            .execute_single_opt()
-            .map_err(|err| eyre!("failed query: {err}"))?
-            .map(|json| json.try_into_any())
+impl<T: DeserializeOwned> KeyValueAddress<T> {
+    fn read(&self, host: &Iroha) -> Result<Option<T>> {
+        let meta = match &self.entity {
+            KeyValueAddressEntity::Trigger(id) => host
+                .query(FindTriggers)
+                .filter_with(|x| x.id.eq(id.to_owned()))
+                .select_with(|x| x.action.metadata)
+                .execute_single(),
+            _ => todo!(),
+        }
+        .map_err(|err| anyhow!("failed query: {err}"))?;
+
+        let maybe_value = meta
+            .get(&self.key)
+            .map(|json| json.try_into_any().with_context(|| "cannot deserialize"))
             .transpose()?;
 
-        Ok(value)
+        Ok(maybe_value)
     }
 }
 
-fn check_block_height(chain: &Checkpoint, message: &RelayBlockMessage) -> Result<ControlFlow<()>> {
-    let snapshot_height = chain.block.map(|x| x.height().get()).unwrap_or(0);
+impl<T: Serialize> KeyValueAddress<T> {
+    fn write(&self, host: &Iroha, value: &T) -> Result<()> {
+        match &self.entity {
+            KeyValueAddressEntity::Nft(id) => host.submit(&SetKeyValue::nft(
+                id.to_owned(),
+                self.key.to_owned(),
+                Json::new(value),
+            )),
+            _ => todo!(),
+        }
+        .map_err(|err| anyhow!("failed tx: {err}"))
+    }
+}
+
+fn check_block_height(
+    checkpoint: &Checkpoint,
+    message: &RelayBlockMessage,
+) -> Result<ControlFlow<()>> {
+    let snapshot_height = checkpoint.block.map(|x| x.height().get()).unwrap_or(0);
     let msg_height = message.header.height().get();
 
     if snapshot_height == msg_height {
@@ -200,7 +247,7 @@ fn check_block_height(chain: &Checkpoint, message: &RelayBlockMessage) -> Result
     } else if snapshot_height + 1 == msg_height {
         Ok(ControlFlow::Continue(()))
     } else {
-        Err(eyre!(
+        Err(anyhow!(
             "Expected message with height {snapshot_height} or + 1, got {msg_height}"
         ))
     }
@@ -248,17 +295,13 @@ fn validate_block_signatures(chain: &Checkpoint, message: &RelayBlockMessage) ->
 
 // Assuming max 2^9 = 512 transactions per block
 const MAX_VERIFY_DEPTH: usize = 9;
+const METADATA_DESTINATION: &str = "destination";
 
-fn process_transactions(
-    host: &Iroha,
-    config: &Config,
-    message: &RelayBlockMessage,
-    chain: &mut Checkpoint,
-) -> Result<()> {
+fn process_transactions(host: &Iroha, config: &Config, message: &RelayBlockMessage) -> Result<()> {
     let block_merkle_root = message
         .header
         .merkle_root()
-        .ok_or_eyre("Block contains no transactions")?;
+        .ok_or_else(|| anyhow!("Block contains no transactions"))?;
 
     for tx in &message.interesting_transactions {
         let tx_hash = tx.entrypoint_hash();
@@ -273,15 +316,82 @@ fn process_transactions(
         }
 
         // boom - valid
-
         // now match and apply
 
-        if let TransactionEntrypoint::External(tx) = tx.entrypoint()
-            && let Executable::Instructions(instructions) = tx.instructions()
-        {
-            todo!()
+        match &config.mode {
+            OperationMode::Hub {
+                domestic_chain: other_chain,
+                approved_transfers_addr,
+            } => handle_tx_hub(tx, other_chain, approved_transfers_addr, host, config)?,
+            OperationMode::Domestic { chain } => handle_tx_domestic(tx, chain, host, config)?,
         }
     }
 
+    Ok(())
+}
+
+fn handle_tx_hub(
+    tx: &CommittedTransaction,
+    other_chain: &ChainId,
+    approved_transfers_addr: &KeyValueAddress<HubChainTransferPayload>,
+    host: &Iroha,
+    config: &Config,
+) -> Result<()> {
+    if let TransactionEntrypoint::External(tx) = tx.entrypoint()
+        && let Executable::Instructions(instructions) = tx.instructions()
+        && let [InstructionBox::Transfer(TransferBox::Asset(transfer))] =
+            instructions.iter().as_slice()
+    {
+        // Detect transfer from a user account to an omnibus account
+        // Detect destination account in metadata
+
+        let None = config.chain_by_omnibus_account(transfer.source().account()) else {
+            debug!("ignoring, source account is omnibus");
+            return Ok(());
+        };
+        let Some(destination_chain) = config.chain_by_omnibus_account(transfer.destination())
+        else {
+            debug!("ignoring, destination account is not omnibus");
+            return Ok(());
+        };
+        let Some(destination_account) = tx
+            .metadata()
+            .get(METADATA_DESTINATION)
+            .map(|json| {
+                let str: String = json.try_into_any().with_context(|| "bad json string")?;
+                let acc =
+                    AccountId::from_str(&str).map_err(|err| anyhow!("bad account id: {err}"))?;
+                Ok::<AccountId, anyhow::Error>(acc)
+            })
+            .transpose()?
+        else {
+            debug!("ingoring, could not find `{METADATA_DESTINATION}` in metadata");
+            return Ok(());
+        };
+
+        // Okay - now produce a `SetKeyValue` instruction with the record of the transfer
+
+        let hub_transfer = HubChainTransferPayload {
+            source_chain: other_chain.to_owned(),
+            source_account: transfer.source().account().to_owned(),
+            destination_chain: destination_chain.to_owned(),
+            destination_account,
+            asset: transfer.source().definition().to_owned(),
+            object: transfer.object().to_owned(),
+        };
+
+        approved_transfers_addr.write(&host, &hub_transfer)?;
+    }
+
+    Ok(())
+}
+
+fn handle_tx_domestic(
+    _tx: &CommittedTransaction,
+    _chain: &ChainId,
+    _host: &Iroha,
+    _config: &Config,
+) -> Result<()> {
+    // TODO: extract SetKeyValue instructions produced by the trigger on the hub chain
     Ok(())
 }
