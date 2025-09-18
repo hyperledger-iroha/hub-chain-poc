@@ -667,7 +667,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "hub-chain-trigger"
+name = "hub_chain_trigger"
 version = "0.0.0"
 dependencies = [
  "anyhow",
