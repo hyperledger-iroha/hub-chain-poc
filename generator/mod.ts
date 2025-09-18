@@ -28,13 +28,10 @@ const ASSETS = [
 
 // =============================
 
-const CONFIG_MOUNT = "/config/main";
-
-const WASM_VOLUME = "wasm-artifacts";
-const WASM_VOLUME_MOUNT = "/config/wasm";
+const CONFIG_MOUNT = "/config";
 
 const TRIGGER_BUILDER_SERVICE_NAME = "trigger-builder";
-const TRIGGER_WASM_NAME = "hub_chain_trigger.wasm";
+const TRIGGER_WASM_NAME = "hub_chain_trigger.opt.wasm";
 
 const Hub = Symbol("hub-chain");
 type ChainId = typeof Hub | string;
@@ -231,12 +228,12 @@ function genesisFor(chain: ChainId) {
     chain: chainToStr(chain),
     executor: "executor.wasm",
     instructions,
-    wasm_dir: "/",
+    wasm_dir: ".",
     wasm_triggers: [
       {
         id: "hub_chain",
         action: {
-          executable: path.join(WASM_VOLUME_MOUNT, TRIGGER_WASM_NAME),
+          executable: path.join("wasm", TRIGGER_WASM_NAME),
           repeats: "Indefinitely",
           authority: admin.id.toString(),
           filter: { Time: { PreCommit: null } },
@@ -312,7 +309,6 @@ function peerComposeService(chain: ChainId, i: number) {
       image: IROHA_IMAGE,
       volumes: [
         `.:${CONFIG_MOUNT}`,
-        `${WASM_VOLUME}:${WASM_VOLUME_MOUNT}`,
       ],
       environment,
       ports,
@@ -423,7 +419,7 @@ function triggerBuilderService() {
     build: {
       context: "../trigger",
     },
-    volumes: [`${WASM_VOLUME}:/app/outputs`],
+    volumes: [`../config/wasm:/app/outputs`],
   };
 }
 
@@ -433,9 +429,6 @@ const dockerCompose = {
     ...peerServices(),
     ...relayServices(),
     ui: uiService(),
-  },
-  volumes: {
-    [WASM_VOLUME]: {},
   },
 };
 

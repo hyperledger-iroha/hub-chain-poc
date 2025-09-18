@@ -10,3 +10,6 @@ COPY src src
 RUN cargo build --release
 
 RUN mkdir -p outputs && cp target/wasm32-unknown-unknown/release/hub_chain_trigger.wasm ./outputs/
+
+RUN apt-get update && apt-get install binaryen
+RUN cd outputs && wasm-opt hub_chain_trigger.wasm -o hub_chain_trigger.opt.wasm -Oz --vacuum
