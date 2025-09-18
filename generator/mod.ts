@@ -28,6 +28,14 @@ const ASSETS = [
 
 // =============================
 
+const CONFIG_MOUNT = "/config/main";
+
+const WASM_VOLUME = "wasm-artifacts";
+const WASM_VOLUME_MOUNT = "/config/wasm";
+
+const TRIGGER_BUILDER_SERVICE_NAME = "trigger-builder";
+const TRIGGER_WASM_NAME = "hub_chain_trigger.wasm";
+
 const Hub = Symbol("hub-chain");
 type ChainId = typeof Hub | string;
 
@@ -223,8 +231,18 @@ function genesisFor(chain: ChainId) {
     chain: chainToStr(chain),
     executor: "executor.wasm",
     instructions,
-    wasm_dir: "PLACEHOLDER",
-    wasm_triggers: [],
+    wasm_dir: "/",
+    wasm_triggers: [
+      {
+        id: "hub_chain",
+        action: {
+          executable: path.join(WASM_VOLUME_MOUNT, TRIGGER_WASM_NAME),
+          repeats: "Indefinitely",
+          authority: admin.id.toString(),
+          filter: { Time: { PreCommit: null } },
+        },
+      },
+    ],
     topology,
     "parameters": {
       "sumeragi": {
@@ -279,13 +297,13 @@ function peerComposeService(chain: ChainId, i: number) {
 
   const command = isGenesis
     ? `/bin/sh -c "
-  kagami genesis sign /config/chain-${chainToStr(chain)}-genesis.json \\\n\
+  kagami genesis sign ${CONFIG_MOUNT}/chain-${chainToStr(chain)}-genesis.json \\\n\
     --public-key $GENESIS_PUBLIC_KEY \\\n\
     --private-key $GENESIS_PRIVATE_KEY \\\n\
     --out-file /tmp/genesis.signed.scale \\\n\
-  && irohad --config /config/irohad.toml
+  && irohad --config ${CONFIG_MOUNT}/irohad.toml
 "`
-    : `irohad --config /config/irohad.toml`;
+    : `irohad --config ${CONFIG_MOUNT}/irohad.toml`;
 
   const ports = i === 0 ? [`${chainPublicPort(chain)}:8080`] : [];
 
@@ -293,12 +311,18 @@ function peerComposeService(chain: ChainId, i: number) {
     [id]: {
       image: IROHA_IMAGE,
       volumes: [
-        ".:/config",
+        `.:${CONFIG_MOUNT}`,
+        `${WASM_VOLUME}:${WASM_VOLUME_MOUNT}`,
       ],
       environment,
       ports,
       init: true,
       command,
+      depends_on: {
+        [TRIGGER_BUILDER_SERVICE_NAME]: {
+          condition: "service_completed_successfully",
+        },
+      },
       healthcheck: {
         test: "test $(curl -s http://127.0.0.1:8080/status/blocks) -gt 0",
         interval: "1s",
@@ -394,11 +418,24 @@ function uiService() {
   };
 }
 
+function triggerBuilderService() {
+  return {
+    build: {
+      context: "../trigger",
+    },
+    volumes: [`${WASM_VOLUME}:/app/outputs`],
+  };
+}
+
 const dockerCompose = {
   services: {
+    [TRIGGER_BUILDER_SERVICE_NAME]: triggerBuilderService(),
     ...peerServices(),
     ...relayServices(),
     ui: uiService(),
+  },
+  volumes: {
+    [WASM_VOLUME]: {},
   },
 };
 
