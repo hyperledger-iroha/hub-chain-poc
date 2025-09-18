@@ -244,11 +244,11 @@ function genesisFor(chain: ChainId) {
       },
     ],
     topology,
-    "parameters": {
-      "sumeragi": {
-        "block_time_ms": 500,
-        "commit_time_ms": 1000,
-        "max_clock_drift_ms": 1000,
+    parameters: {
+      sumeragi: {
+        block_time_ms: 500,
+        commit_time_ms: 1000,
+        max_clock_drift_ms: 1000,
       },
     },
   };
