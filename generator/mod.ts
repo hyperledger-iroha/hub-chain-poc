@@ -17,8 +17,8 @@ const CONFIG_DIR = path.relative(Deno.cwd(), path.resolve(dirname, "../config"))
 const EXECUTOR = path.resolve(dirname, "executor.wasm");
 
 const IROHA_IMAGE = `hyperledger/iroha:experimental-xx-8c67c3eb749af3b9c468d5b601d6fd40e1d8a453`;
-const CHAINS = ["aaa", "bbb", "ccc"];
-const PEERS_ON_CHAIN = 4;
+const CHAINS = ["aaa", "bbb", "ccc"].slice(0, 1);
+const PEERS_ON_CHAIN = 1;
 const ACCOUNTS_ON_CHAIN = 3;
 const ASSETS = [
   iroha.AssetDefinitionId.parse("rose#wonderland"),
@@ -428,7 +428,7 @@ const dockerCompose = {
     [TRIGGER_BUILDER_SERVICE_NAME]: triggerBuilderService(),
     ...peerServices(),
     ...relayServices(),
-    ui: uiService(),
+    // ui: uiService(),
   },
 };
 
