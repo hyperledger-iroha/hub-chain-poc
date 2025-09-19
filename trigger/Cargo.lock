@@ -718,7 +718,7 @@ dependencies = [
 [[package]]
 name = "iroha_crypto"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "aead",
  "arrayref",
@@ -753,7 +753,7 @@ dependencies = [
 [[package]]
 name = "iroha_data_model"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "base64",
  "derive-where",
@@ -777,7 +777,7 @@ dependencies = [
 [[package]]
 name = "iroha_data_model_derive"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "darling",
  "iroha_macro_utils",
@@ -790,7 +790,7 @@ dependencies = [
 [[package]]
 name = "iroha_derive"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "darling",
  "iroha_macro_utils",
@@ -803,7 +803,7 @@ dependencies = [
 [[package]]
 name = "iroha_macro"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "iroha_derive",
 ]
@@ -811,7 +811,7 @@ dependencies = [
 [[package]]
 name = "iroha_macro_utils"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "darling",
  "drop_bomb",
@@ -824,7 +824,7 @@ dependencies = [
 [[package]]
 name = "iroha_numeric"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "derive_more",
  "displaydoc",
@@ -838,7 +838,7 @@ dependencies = [
 [[package]]
 name = "iroha_primitives"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "derive_more",
  "displaydoc",
@@ -857,7 +857,7 @@ dependencies = [
 [[package]]
 name = "iroha_primitives_derive"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "iroha_numeric",
  "manyhow",
@@ -869,7 +869,7 @@ dependencies = [
 [[package]]
 name = "iroha_schema"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "iroha_schema_derive",
  "serde",
@@ -878,7 +878,7 @@ dependencies = [
 [[package]]
 name = "iroha_schema_derive"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "darling",
  "iroha_macro_utils",
@@ -891,7 +891,7 @@ dependencies = [
 [[package]]
 name = "iroha_smart_contract"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "derive_more",
  "displaydoc",
@@ -905,7 +905,7 @@ dependencies = [
 [[package]]
 name = "iroha_smart_contract_derive"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "iroha_macro_utils",
  "manyhow",
@@ -917,7 +917,7 @@ dependencies = [
 [[package]]
 name = "iroha_smart_contract_utils"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "cfg-if",
  "getrandom",
@@ -928,7 +928,7 @@ dependencies = [
 [[package]]
 name = "iroha_trigger"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "iroha_smart_contract",
  "iroha_smart_contract_utils",
@@ -938,7 +938,7 @@ dependencies = [
 [[package]]
 name = "iroha_trigger_derive"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "darling",
  "iroha_macro_utils",
@@ -951,7 +951,7 @@ dependencies = [
 [[package]]
 name = "iroha_version"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "iroha_macro",
  "iroha_version_derive",
@@ -963,7 +963,7 @@ dependencies = [
 [[package]]
 name = "iroha_version_derive"
 version = "2.0.0-rc.2.0"
-source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=d77d19d2#d77d19d2f61ae9dfaf04c1fc384322aecb5cd490"
+source = "git+https://github.com/hyperledger-iroha/iroha.git?rev=858df795#858df795cc8ea480a214ff73f3087a3bbf5f7d85"
 dependencies = [
  "darling",
  "manyhow",

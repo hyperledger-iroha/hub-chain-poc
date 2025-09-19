@@ -14,9 +14,8 @@ const dirname = import.meta.dirname;
 assert(dirname);
 
 const CONFIG_DIR = path.relative(Deno.cwd(), path.resolve(dirname, "../config"));
-const EXECUTOR = path.resolve(dirname, "executor.wasm");
 
-const IROHA_IMAGE = `hyperledger/iroha:experimental-xx-8c67c3eb749af3b9c468d5b601d6fd40e1d8a453`;
+const IROHA_IMAGE = `hyperledger/iroha:experimental-xx-858df795cc8ea480a214ff73f3087a3bbf5f7d85`;
 const CHAINS = ["aaa", "bbb", "ccc"].slice(0, 1);
 const PEERS_ON_CHAIN = 1;
 const ACCOUNTS_ON_CHAIN = 3;
@@ -30,8 +29,9 @@ const ASSETS = [
 
 const CONFIG_MOUNT = "/config";
 
+const EXECUTOR_BUILDER_SERVICE_NAME = "executor-builder";
 const TRIGGER_BUILDER_SERVICE_NAME = "trigger-builder";
-const TRIGGER_WASM_NAME = "hub_chain_trigger.opt.wasm";
+const TRIGGER_WASM_NAME = "hub_chain_trigger.wasm";
 
 const Hub = Symbol("hub-chain");
 type ChainId = typeof Hub | string;
@@ -75,10 +75,6 @@ const relayAccounts = new Map(CHAINS.map((chain) => {
     id: new iroha.AccountId(key.publicKey(), new iroha.DomainId("system")),
   }];
 }));
-
-const genesisKeys = new Map<ChainId, iroha.KeyPair>(
-  ([...CHAINS, Hub] as const).map((chain) => [chain, iroha.KeyPair.random()]),
-);
 
 const peerKeys = new Map<ChainId, iroha.KeyPair[]>(
   ([...CHAINS, Hub] as const).map(
@@ -225,8 +221,9 @@ function genesisFor(chain: ChainId) {
   const topology = peerKeys.get(chain)!.map(x => x.publicKey());
 
   return {
+    creation_time: new Date().toISOString(),
     chain: chainToStr(chain),
-    executor: "executor.wasm",
+    executor: "wasm/executor.wasm",
     instructions,
     wasm_dir: ".",
     wasm_triggers: [
@@ -247,6 +244,10 @@ function genesisFor(chain: ChainId) {
         commit_time_ms: 1000,
         max_clock_drift_ms: 1000,
       },
+      smart_contract: {
+        fuel: 200_000_000,
+        memory: 200_000_000,
+      },
     },
   };
 }
@@ -263,7 +264,6 @@ function chainPublicPort(chain: ChainId): number {
 
 function peerComposeService(chain: ChainId, i: number) {
   const peerKey = peerKeys.get(chain)!.at(i)!;
-  const genesisKey = genesisKeys.get(chain)!;
 
   const id = peerServiceId(chain, i);
   const trustedPeers = JSON.stringify(
@@ -276,31 +276,15 @@ function peerComposeService(chain: ChainId, i: number) {
 
   const environment = {
     CHAIN: chainToStr(chain),
+    GENESIS: `${CONFIG_MOUNT}/chain-${chainToStr(chain)}-genesis.json`,
     PUBLIC_KEY: peerKey.publicKey().multihash(),
     PRIVATE_KEY: peerKey.privateKey().multihash(),
-    GENESIS_PUBLIC_KEY: genesisKey.publicKey().multihash(),
     P2P_PUBLIC_ADDRESS: `${id}:1337`,
     TRUSTED_PEERS: trustedPeers,
     TERMINAL_COLORS: "true",
   };
 
-  const isGenesis = i === 0;
-  if (isGenesis) {
-    Object.assign(environment, {
-      GENESIS: "/tmp/genesis.signed.scale",
-      GENESIS_PRIVATE_KEY: genesisKey.privateKey().multihash(),
-    });
-  }
-
-  const command = isGenesis
-    ? `/bin/sh -c "
-  kagami genesis sign ${CONFIG_MOUNT}/chain-${chainToStr(chain)}-genesis.json \\\n\
-    --public-key $GENESIS_PUBLIC_KEY \\\n\
-    --private-key $GENESIS_PRIVATE_KEY \\\n\
-    --out-file /tmp/genesis.signed.scale \\\n\
-  && irohad --config ${CONFIG_MOUNT}/irohad.toml
-"`
-    : `irohad --config ${CONFIG_MOUNT}/irohad.toml`;
+  const command = `irohad --config ${CONFIG_MOUNT}/irohad.toml`;
 
   const ports = i === 0 ? [`${chainPublicPort(chain)}:8080`] : [];
 
@@ -316,6 +300,9 @@ function peerComposeService(chain: ChainId, i: number) {
       command,
       depends_on: {
         [TRIGGER_BUILDER_SERVICE_NAME]: {
+          condition: "service_completed_successfully",
+        },
+        [EXECUTOR_BUILDER_SERVICE_NAME]: {
           condition: "service_completed_successfully",
         },
       },
@@ -419,13 +406,25 @@ function triggerBuilderService() {
     build: {
       context: "../trigger",
     },
-    volumes: [`../config/wasm:/app/outputs`],
+    volumes: [`../config/wasm:/usr/wasm`],
+    command: `\
+sh -c "
+  cp /app/outputs/* /usr/wasm/ &&
+  echo 'Copied WASMs'
+"`,
   };
+}
+
+function defaultExecutorBuilderService() {
+  const cfg = triggerBuilderService();
+  cfg.build.context = `../executor`;
+  return cfg;
 }
 
 const dockerCompose = {
   services: {
     [TRIGGER_BUILDER_SERVICE_NAME]: triggerBuilderService(),
+    [EXECUTOR_BUILDER_SERVICE_NAME]: defaultExecutorBuilderService(),
     ...peerServices(),
     ...relayServices(),
     // ui: uiService(),
@@ -448,10 +447,6 @@ for (const chain of ALL_CHAINS) {
     await writeConfig(relayConfigPath(chain), JSON.stringify(relayConfig(chain), null, 2));
   }
 }
-
-const executorDest = path.join(CONFIG_DIR, "executor.wasm");
-$.logStep("Writing", executorDest);
-await Deno.copyFile(EXECUTOR, executorDest);
 
 await writeConfig("ui.json", JSON.stringify(uiConfig(), null, 2));
 

@@ -9,8 +9,8 @@ debug = []
 crate-type = ['cdylib']
 
 [dependencies]
-iroha_crypto = { git = "https://github.com/hyperledger-iroha/iroha.git", rev = "d77d19d2", default-features = false }
-iroha_trigger = { git = "https://github.com/hyperledger-iroha/iroha.git", rev = "d77d19d2" }
+iroha_crypto = { git = "https://github.com/hyperledger-iroha/iroha.git", rev = "858df795", default-features = false }
+iroha_trigger = { git = "https://github.com/hyperledger-iroha/iroha.git", rev = "858df795" }
 
 anyhow = { version = "1.0", default-features = false }
 dlmalloc = { version = "0.2.6", features = ["global"] }
