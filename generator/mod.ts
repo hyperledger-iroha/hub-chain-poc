@@ -96,7 +96,11 @@ const sharedConfig = {
   torii: {
     address: "0.0.0.0:8080",
   },
-  logger: { format: "pretty", filter: "iroha_core=debug" },
+  logger: {
+    format: "pretty",
+    // TODO: in iroha, change "WASM" module to something with "iroha_" prefix?
+    filter: "iroha_core=debug,WASM=trace",
+  },
 };
 
 function chainToStr(chain: ChainId): string {

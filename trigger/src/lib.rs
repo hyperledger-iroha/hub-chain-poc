@@ -130,7 +130,7 @@ struct HubChainTransferPayload {
 
 #[iroha_trigger::main]
 fn main(host: Iroha, ctx: Context) {
-    main_result(host, ctx).unwrap();
+    main_result(host, ctx).dbg_unwrap();
 }
 
 fn main_result(host: Iroha, ctx: Context) -> Result<()> {
