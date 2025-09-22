@@ -136,6 +136,11 @@ fn main(host: Iroha, ctx: Context) {
 fn main_result(host: Iroha, ctx: Context) -> Result<()> {
     info!("Hello from the Hub Chain Trigger!");
 
+    if ctx.curr_block.is_genesis() {
+        debug!("Skipping genesis block");
+        return Ok(());
+    }
+
     if !matches!(ctx.event, EventBox::Time(_)) {
         bail!("Trigger is designed to work as a time trigger");
     }
