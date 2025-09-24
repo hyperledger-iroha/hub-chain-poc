@@ -207,18 +207,17 @@ impl<T> KeyValueAddress<T> {
 
 impl<T: DeserializeOwned> KeyValueAddress<T> {
     fn read(&self, host: &Iroha) -> Result<Option<T>> {
-        let meta = match &self.entity {
+        let maybe_json = match &self.entity {
             KeyValueAddressEntity::Trigger(id) => host
                 .query(FindTriggers)
                 .filter_with(|x| x.id.eq(id.to_owned()))
-                .select_with(|x| x.action.metadata)
-                .execute_single(),
+                .select_with(|x| x.action.metadata.key(self.key.to_owned()))
+                .execute_single_opt(),
             _ => todo!(),
         }
         .map_err(|err| anyhow!("failed query: {err}"))?;
 
-        let maybe_value = meta
-            .get(&self.key)
+        let maybe_value = maybe_json
             .map(|json| json.try_into_any().with_context(|| "cannot deserialize"))
             .transpose()?;
 
