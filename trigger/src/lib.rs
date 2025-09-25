@@ -12,6 +12,7 @@ use core::str::FromStr as _;
 use alloc::borrow::ToOwned;
 use alloc::collections::btree_map::BTreeMap;
 use alloc::collections::btree_set::BTreeSet;
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -19,6 +20,9 @@ use anyhow::{Context as _, Result, anyhow, bail};
 use dlmalloc::GlobalDlmalloc;
 use iroha_crypto::SignatureOf;
 use iroha_trigger::data_model::block::BlockHeader;
+use iroha_trigger::data_model::query::builder::SingleQueryError;
+use iroha_trigger::data_model::query::error::FindError;
+use iroha_trigger::data_model::query::error::QueryExecutionFail;
 use iroha_trigger::log::*;
 use iroha_trigger::prelude::*;
 use serde::de::DeserializeOwned;
@@ -52,10 +56,12 @@ struct KeyValueAddress<T> {
     entity: KeyValueAddressEntity,
     /// Metadata key
     key: Name,
+    #[serde(skip)]
     _value: PhantomData<T>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
+#[serde(tag = "type", content = "id")]
 enum KeyValueAddressEntity {
     Domain(DomainId),
     Account(AccountId),
@@ -130,7 +136,11 @@ struct HubChainTransferPayload {
 
 #[iroha_trigger::main]
 fn main(host: Iroha, ctx: Context) {
-    main_result(host, ctx).dbg_unwrap();
+    // Iroha does not print anything useful when just `unwrap` or `dbg_unwrap` the result
+    if let Err(error) = main_result(host, ctx) {
+        error!(&format!("Trigger encountered an error: {error:?}"));
+        panic!("boom");
+    }
 }
 
 fn main_result(host: Iroha, ctx: Context) -> Result<()> {
@@ -148,7 +158,7 @@ fn main_result(host: Iroha, ctx: Context) -> Result<()> {
 
     let config: Config = KeyValueAddress::new(
         KeyValueAddressEntity::Trigger(ctx.id.to_owned()),
-        ctx.id.name().to_owned(),
+        Name::from_str(SELF_CONFIG_KEY).unwrap(),
     )
     .read(&host)?
     .ok_or_else(|| anyhow!("cannot find config"))?;
@@ -207,35 +217,91 @@ impl<T> KeyValueAddress<T> {
 
 impl<T: DeserializeOwned> KeyValueAddress<T> {
     fn read(&self, host: &Iroha) -> Result<Option<T>> {
-        let maybe_json = match &self.entity {
+        let result = match &self.entity {
+            KeyValueAddressEntity::Domain(id) => host
+                .query(FindDomains)
+                .filter_with(|x| x.id.eq(id.to_owned()))
+                .select_with(|x| x.metadata.key(self.key.to_owned()))
+                .execute_single(),
+            KeyValueAddressEntity::Account(id) => host
+                .query(FindAccounts)
+                .filter_with(|x| x.id.eq(id.to_owned()))
+                .select_with(|x| x.metadata.key(self.key.to_owned()))
+                .execute_single(),
+            KeyValueAddressEntity::AssetDefinition(id) => host
+                .query(FindAssetsDefinitions)
+                .filter_with(|x| x.id.eq(id.to_owned()))
+                .select_with(|x| x.metadata.key(self.key.to_owned()))
+                .execute_single(),
+            KeyValueAddressEntity::Nft(id) => host
+                .query(FindNfts)
+                .filter_with(|x| x.id.eq(id.to_owned()))
+                .select_with(|x| x.content.key(self.key.to_owned()))
+                .execute_single(),
             KeyValueAddressEntity::Trigger(id) => host
                 .query(FindTriggers)
                 .filter_with(|x| x.id.eq(id.to_owned()))
                 .select_with(|x| x.action.metadata.key(self.key.to_owned()))
-                .execute_single_opt(),
-            _ => todo!(),
-        }
-        .map_err(|err| anyhow!("failed query: {err}"))?;
+                .execute_single(),
+        };
 
-        let maybe_value = maybe_json
-            .map(|json| json.try_into_any().with_context(|| "cannot deserialize"))
-            .transpose()?;
+        let result = match result {
+            Ok(json) => Ok(Some(json)),
+            Err(SingleQueryError::QueryError(ValidationFail::QueryFailed(
+                QueryExecutionFail::Find(FindError::MetadataKey(_)),
+            ))) => Ok(None),
+            Err(other) => Err(other),
+        };
 
-        Ok(maybe_value)
+        let value_opt = result
+            .map_err(|err| anyhow!("failed query: {err:?}"))
+            .and_then(|json_opt| {
+                json_opt
+                    .map(|json| {
+                        json.try_into_any()
+                            .with_context(|| format!("cannot deserialize JSON: {json}"))
+                    })
+                    .transpose()
+            })
+            .with_context(|| format!("while reading \"{}\" from {:?}", self.key, self.entity))?;
+
+        Ok(value_opt)
     }
 }
 
 impl<T: Serialize> KeyValueAddress<T> {
     fn write(&self, host: &Iroha, value: &T) -> Result<()> {
         match &self.entity {
+            KeyValueAddressEntity::Domain(id) => host.submit(&SetKeyValue::domain(
+                id.to_owned(),
+                self.key.to_owned(),
+                Json::new(value),
+            )),
+            KeyValueAddressEntity::Account(id) => host.submit(&SetKeyValue::account(
+                id.to_owned(),
+                self.key.to_owned(),
+                Json::new(value),
+            )),
+            KeyValueAddressEntity::AssetDefinition(id) => {
+                host.submit(&SetKeyValue::asset_definition(
+                    id.to_owned(),
+                    self.key.to_owned(),
+                    Json::new(value),
+                ))
+            }
             KeyValueAddressEntity::Nft(id) => host.submit(&SetKeyValue::nft(
                 id.to_owned(),
                 self.key.to_owned(),
                 Json::new(value),
             )),
-            _ => todo!(),
+            KeyValueAddressEntity::Trigger(id) => host.submit(&SetKeyValue::trigger(
+                id.to_owned(),
+                self.key.to_owned(),
+                Json::new(value),
+            )),
         }
-        .map_err(|err| anyhow!("failed tx: {err}"))
+        .map_err(|err| anyhow!("failed tx: {err:?}"))
+        .with_context(|| format!("while writing \"{}\" to {:?}", self.key, self.entity))
     }
 }
 

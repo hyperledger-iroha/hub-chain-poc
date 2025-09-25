@@ -16,6 +16,6 @@
     "debug": "npm:debug@^4.4.1",
     "true-myth": "npm:true-myth@^9.0.1",
     "ts-pattern": "npm:ts-pattern@^5.8.0",
-    "zod": "npm:zod@^4.0.15",
+    "zod": "npm:zod@^4.1.11",
   }
 }

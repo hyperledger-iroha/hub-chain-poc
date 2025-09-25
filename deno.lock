@@ -37,7 +37,7 @@
     "npm:true-myth@^9.0.1": "9.0.1",
     "npm:ts-pattern@^5.8.0": "5.8.0",
     "npm:type-fest@^4.33.0": "4.41.0",
-    "npm:zod@^4.0.15": "4.0.15"
+    "npm:zod@^4.1.11": "4.1.11"
   },
   "jsr": {
     "@david/console-static-text@0.3.0": {
@@ -190,8 +190,8 @@
     "undici-types@6.21.0": {
       "integrity": "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ=="
     },
-    "zod@4.0.15": {
-      "integrity": "sha512-2IVHb9h4Mt6+UXkyMs0XbfICUh1eUrlJJAOupBHUhLRnKkruawyDddYRCs0Eizt900ntIMk9/4RksYl+FgSpcQ=="
+    "zod@4.1.11": {
+      "integrity": "sha512-WPsqwxITS2tzx1bzhIKsEs19ABD5vmCVa4xBo2tq/SrV4RNZtfws1EnCWQXM6yh8bD08a1idvkB5MZSBiZsjwg=="
     }
   },
   "workspace": {
@@ -209,7 +209,7 @@
       "npm:debug@^4.4.1",
       "npm:true-myth@^9.0.1",
       "npm:ts-pattern@^5.8.0",
-      "npm:zod@^4.0.15"
+      "npm:zod@^4.1.11"
     ]
   }
 }

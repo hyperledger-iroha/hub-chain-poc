@@ -3,7 +3,7 @@ FROM hyperledger/iroha:experimental-xx-858df795cc8ea480a214ff73f3087a3bbf5f7d85 
 FROM rust:1.89-bullseye
 WORKDIR /app
 
-ARG IROHA_REV=858df795cc8ea480a214ff73f3087a3bbf5f7d85
+ARG IROHA_REV=a84bc8893451cf08f346eb476097c13ca7bf65fb
 RUN git init && \
     git remote add origin https://github.com/hyperledger-iroha/iroha.git && \
     git fetch origin $IROHA_REV && \

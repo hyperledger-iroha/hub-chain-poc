@@ -42,8 +42,8 @@ importers:
         specifier: ^3.5.17
         version: 3.5.18(typescript@5.8.3)
       zod:
-        specifier: ^4.0.15
-        version: 4.0.15
+        specifier: ^4.1.11
+        version: 4.1.11
     devDependencies:
       '@types/ringbufferjs':
         specifier: ^1.1.2
@@ -1662,8 +1662,8 @@ packages:
     resolution: {integrity: sha512-GQHQqAopRhwU8Kt1DDM8NjibDXHC8eoh1erhGAJPEyveY9qqVeXvVikNKrDz69sHowPMorbPUrH/mx8c50eiBQ==}
     engines: {node: '>=18'}
 
-  zod@4.0.15:
-    resolution: {integrity: sha512-2IVHb9h4Mt6+UXkyMs0XbfICUh1eUrlJJAOupBHUhLRnKkruawyDddYRCs0Eizt900ntIMk9/4RksYl+FgSpcQ==}
+  zod@4.1.11:
+    resolution: {integrity: sha512-WPsqwxITS2tzx1bzhIKsEs19ABD5vmCVa4xBo2tq/SrV4RNZtfws1EnCWQXM6yh8bD08a1idvkB5MZSBiZsjwg==}
 
 snapshots:
 
@@ -3224,4 +3224,4 @@ snapshots:
 
   yoctocolors@2.1.1: {}
 
-  zod@4.0.15: {}
+  zod@4.1.11: {}

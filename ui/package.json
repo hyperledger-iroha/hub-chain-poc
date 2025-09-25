@@ -19,7 +19,7 @@
     "ts-pattern": "^5.8.0",
     "unocss": "^66.4.1",
     "vue": "^3.5.17",
-    "zod": "^4.0.15"
+    "zod": "^4.1.11"
   },
   "devDependencies": {
     "@types/ringbufferjs": "^1.1.2",

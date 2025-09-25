@@ -6,17 +6,23 @@ import * as fs from "@std/fs";
 import * as path from "@std/path";
 import * as TOML from "@std/toml";
 import * as YAML from "@std/yaml";
-import { JsonValue } from "npm:type-fest@^4.33.0";
 import { z } from "zod";
-import { RelayConfigSchema, UiConfigSchema } from "../ui/shared.ts";
+import {
+  CheckpointSchema,
+  KeyValueEntitySchema,
+  RelayConfigSchema,
+  TriggerConfigSchema,
+  UiConfigSchema,
+} from "../ui/shared.ts";
 
 const dirname = import.meta.dirname;
 assert(dirname);
 
 const CONFIG_DIR = path.relative(Deno.cwd(), path.resolve(dirname, "../config"));
 
-const IROHA_IMAGE = `hyperledger/iroha:experimental-xx-858df795cc8ea480a214ff73f3087a3bbf5f7d85`;
-const CHAINS = ["aaa", "bbb", "ccc"].slice(0, 1);
+// const IROHA_IMAGE = `hyperledger/iroha:experimental-xx-858df795cc8ea480a214ff73f3087a3bbf5f7d85`;
+const IROHA_IMAGE = `hyperledger/iroha:local-uwp`;
+const CHAINS = ["aaa", "bbb", "ccc"];
 const PEERS_ON_CHAIN = 1;
 const ACCOUNTS_ON_CHAIN = 3;
 const ASSETS = [
@@ -32,6 +38,17 @@ const CONFIG_MOUNT = "/config";
 const EXECUTOR_BUILDER_SERVICE_NAME = "executor-builder";
 const TRIGGER_BUILDER_SERVICE_NAME = "trigger-builder";
 const TRIGGER_WASM_NAME = "hub_chain_trigger.wasm";
+const TRIGGER_PATH_IN_CONFIG = path.join("wasm", TRIGGER_WASM_NAME);
+
+const METADATA_KEYS = {
+  TRIGGER: {
+    CONFIG: "config",
+    CHECKPOINT: "checkpoint",
+  },
+  RELAY_ACCOUNT: {
+    BLOCK_MESSAGE: "block_message",
+  },
+};
 
 const Hub = Symbol("hub-chain");
 type ChainId = typeof Hub | string;
@@ -126,6 +143,17 @@ function genesisFor(chain: ChainId) {
   let mintAssets: { id: iroha.AssetId; quantity: number | string }[];
   let transferPermissions: { account: iroha.AccountId; asset: iroha.AssetDefinitionId }[];
 
+  let wasmTriggers: {
+    id: string;
+    action: {
+      executable: string;
+      repeats: string;
+      authority: string;
+      filter: unknown;
+    };
+  }[];
+  let setKeyValueInstructions: ({ key: string; value: unknown } & z.infer<typeof KeyValueEntitySchema>)[];
+
   if (chain !== Hub) {
     const accounts = userAccounts.get(chain)!;
     const relay = relayAccounts.get(chain)!;
@@ -148,6 +176,54 @@ function genesisFor(chain: ChainId) {
         account: acc.id,
       }))
     );
+
+    const TRIGGER_ID = "hub_chain";
+
+    wasmTriggers = [
+      {
+        id: TRIGGER_ID,
+        action: {
+          executable: TRIGGER_PATH_IN_CONFIG,
+          repeats: "Indefinitely",
+          authority: admin.id.toString(),
+          filter: { Time: { PreCommit: null } },
+        },
+      },
+    ];
+
+    const triggerConfig: z.infer<typeof TriggerConfigSchema> = {
+      mode: { type: "Domestic", chain },
+      checkpoint_addr: {
+        entity: { type: "Trigger", id: TRIGGER_ID },
+        key: METADATA_KEYS.TRIGGER.CHECKPOINT,
+      },
+      block_message_addr: {
+        entity: { type: "Account", id: relay.id },
+        key: METADATA_KEYS.RELAY_ACCOUNT.BLOCK_MESSAGE,
+      },
+      chains: Object.fromEntries(
+        [...omnibusAccounts]
+          .filter(([chainX]) => chainX !== chain)
+          .map(([chain, acc]) => [chain, { omnibus_account: acc.id }]),
+      ),
+    };
+
+    setKeyValueInstructions = [
+      {
+        type: "Trigger",
+        id: TRIGGER_ID,
+        key: METADATA_KEYS.TRIGGER.CONFIG,
+        value: triggerConfig,
+      },
+      {
+        type: "Trigger",
+        id: TRIGGER_ID,
+        key: METADATA_KEYS.TRIGGER.CHECKPOINT,
+        value: CheckpointSchema.encode({
+          validators: new Set(peerKeys.get(Hub)!.map(x => x.publicKey())),
+        }),
+      },
+    ];
   } else {
     const relays = CHAINS.map(x => relayAccounts.get(x)!);
 
@@ -166,6 +242,54 @@ function genesisFor(chain: ChainId) {
         account: relay.id,
       }))
     );
+
+    const triggerId = (chain: string) => `hub_chain_for_${chain}`;
+
+    wasmTriggers = CHAINS.map(chain => ({
+      id: triggerId(chain),
+      action: {
+        executable: TRIGGER_PATH_IN_CONFIG,
+        repeats: "Indefinitely",
+        authority: admin.id.toString(),
+        filter: { Time: { PreCommit: null } },
+      },
+    }));
+
+    setKeyValueInstructions = CHAINS.flatMap((chain) => {
+      const triggerConfig: z.infer<typeof TriggerConfigSchema> = {
+        mode: { type: "Domestic", chain },
+        checkpoint_addr: {
+          entity: { type: "Trigger", id: triggerId(chain) },
+          key: METADATA_KEYS.TRIGGER.CHECKPOINT,
+        },
+        block_message_addr: {
+          entity: { type: "Account", id: relayAccounts.get(chain)!.id },
+          key: METADATA_KEYS.RELAY_ACCOUNT.BLOCK_MESSAGE,
+        },
+        chains: Object.fromEntries(
+          [...omnibusAccounts]
+            .filter(([chainX]) => chainX !== chain)
+            .map(([chain, acc]) => [chain, { omnibus_account: acc.id }]),
+        ),
+      };
+
+      return [
+        {
+          type: "Trigger",
+          id: triggerId(chain),
+          key: METADATA_KEYS.TRIGGER.CONFIG,
+          value: triggerConfig,
+        },
+        {
+          type: "Trigger",
+          id: triggerId(chain),
+          key: METADATA_KEYS.TRIGGER.CHECKPOINT,
+          value: CheckpointSchema.encode({
+            validators: new Set(peerKeys.get(Hub)!.map(x => x.publicKey())),
+          }),
+        },
+      ];
+    });
   }
 
   const instructions = [
@@ -220,6 +344,16 @@ function genesisFor(chain: ChainId) {
         },
       },
     })),
+
+    ...setKeyValueInstructions.map(x => ({
+      SetKeyValue: {
+        [x.type]: {
+          object: x.id,
+          key: x.key,
+          value: x.value,
+        },
+      },
+    })),
   ];
 
   const topology = peerKeys.get(chain)!.map(x => x.publicKey());
@@ -230,27 +364,13 @@ function genesisFor(chain: ChainId) {
     executor: "wasm/executor.wasm",
     instructions,
     wasm_dir: ".",
-    wasm_triggers: [
-      {
-        id: "hub_chain",
-        action: {
-          executable: path.join("wasm", TRIGGER_WASM_NAME),
-          repeats: "Indefinitely",
-          authority: admin.id.toString(),
-          filter: { Time: { PreCommit: null } },
-        },
-      },
-    ],
+    wasm_triggers: wasmTriggers,
     topology,
     parameters: {
       sumeragi: {
         block_time_ms: 500,
         commit_time_ms: 1000,
         max_clock_drift_ms: 1000,
-      },
-      smart_contract: {
-        fuel: 200_000_000,
-        memory: 200_000_000,
       },
     },
   };
@@ -312,7 +432,7 @@ function peerComposeService(chain: ChainId, i: number) {
       },
       healthcheck: {
         test: "test $(curl -s http://127.0.0.1:8080/status/blocks) -gt 0",
-        interval: "1s",
+        interval: "3s",
         timeout: "200ms",
         retries: "10",
         start_period: "2s",
