@@ -1,20 +1,26 @@
-import { Client, SetupEventsReturn } from "@iroha/client";
-import { blockHash } from "@iroha/core";
+import { Client } from "@iroha/client";
 import * as iroha from "@iroha/core/data-model";
-import { assert } from "@std/assert";
+import { assert, fail, unimplemented } from "@std/assert";
 import { delay } from "@std/async";
-import Debug from "debug";
+import { pino } from "pino";
 import * as tm from "true-myth";
-import { match, P } from "ts-pattern";
+import { match } from "ts-pattern";
 import { z } from "zod";
-import { RelayConfigSchema } from "../ui/shared.ts";
+import { BlockMessageSchema, CheckpointSchema, KeyValueAddressSchema, RelayConfigSchema } from "../ui/shared.ts";
 
-const dbg = Debug("relay");
+type KeyValueAddress = z.output<typeof KeyValueAddressSchema>;
+type Checkpoint = z.output<typeof CheckpointSchema>;
+type BlockMessage = z.output<typeof BlockMessageSchema>;
 
 const configPath = Deno.env.get("RELAY_CONFIG");
-assert(configPath, "Set config to RELAY_CONFIG");
+assert(configPath, "Set config path to RELAY_CONFIG");
 
-dbg("Loading config from", configPath);
+const log = pino({
+  transport: { target: "pino-pretty" },
+  base: { config: configPath },
+});
+
+log.info("Loading config");
 const config = await Deno.readTextFile(configPath).then(text => RelayConfigSchema.parse(JSON.parse(text)));
 
 const clients = {
@@ -32,170 +38,114 @@ const clients = {
   }),
 };
 
-await Promise.all([listenDomestic(), listenHub()]);
+await Promise.all([
+  loop({
+    targetClient: clients.hub,
+    targetCheckpoint: createKeyValue(config.hubCheckpoint, CheckpointSchema),
+    targetBlockMessage: createKeyValue(config.hubBlockMessage, BlockMessageSchema),
+    sourceClient: clients.domestic,
+  }),
+  // TODO: reverse loop
+]);
 
-async function listenDomestic() {
-  for await (const tx of interceptTransactions(clients.domestic)) {
-    const transfer = findTransfer(tx);
-    if (transfer.isJust) {
-      dbg("submitting transaction on hub chain...");
-      (await forwardTransferToHub(transfer.value))
-        .mapOrElse((err) => {
-          dbg("transfer err", err);
-        }, () => {
-          dbg("transfer is made on the hub chain");
-        });
-    }
-  }
-}
-
-async function listenHub() {
-  for await (const tx of interceptTransactions(clients.hub)) {
-    const transfer = findTransfer(tx);
-    if (transfer.isJust) {
-      dbg("submitting transaction on domestic chain...");
-      (await forwardTransferToDomestic(transfer.value))
-        .mapOrElse((err) => {
-          dbg("transfer err", err);
-        }, () => {
-          dbg("transfer is made on the  domestic chain");
-        });
-    }
-  }
-}
-
-type Transfer = {
-  destination: iroha.MapEntry<iroha.Name, iroha.Json>;
-  transfer: iroha.Transfer<iroha.AssetId, iroha.Numeric, iroha.AccountId>;
-};
-
-async function* eventsGenerator(events: SetupEventsReturn) {
-  while (true) {
-    const event = await Promise.race([
-      events.ee.once("event").then(x => tm.result.ok(x)),
-      events.ee.once("close").then(() => tm.result.err(null)),
-    ]);
-
-    if (event.isOk) yield event.value;
-    return;
-  }
-}
-
-async function* interceptTransactions(client: Client): AsyncGenerator<iroha.SignedTransaction> {
+/**
+ * Main relay loop.
+ *
+ * 1. On the target chain, wait until the checkpoint is synced with the block message
+ * 2. On the source chain, wait until the next block on appears
+ * 3. Post a new block message to the target chain
+ */
+async function loop(opts: {
+  targetClient: Client;
+  targetCheckpoint: KeyValueReadWrite<Checkpoint>;
+  targetBlockMessage: KeyValueReadWrite<BlockMessage>;
+  sourceClient: Client;
+}) {
+  const log1 = log.child({});
   while (true) {
     try {
-      const events = await client.events({
-        filters: [iroha.EventFilterBox.Pipeline.Block({
-          status: iroha.BlockStatus.Applied,
-          height: null,
-        })],
-      });
+      const checkpoint = (await opts.targetCheckpoint.read(opts.targetClient))
+        .unwrapOrElse(() => fail("checkpoint must always exist"));
 
-      for await (const event of eventsGenerator(events)) {
-        assert(
-          event.kind === "Pipeline" && event.value.kind === "Block" && event.value.value.status.kind === "Applied",
-          "Bad filter",
-        );
-        const hash = blockHash(event.value.value.header);
+      const blockMessage = await opts.targetBlockMessage.read(opts.targetClient);
 
-        const block = await client.find.blocks()
-          .filterWith(block => iroha.CompoundPredicate.Atom(block.header.hash.equals(hash)))
-          .executeSingle();
-
-        const errors = new Set(block.value.errors.map(x => Number(x.index)));
-
-        for (const tx of block.value.payload.transactions.filter((_tx, i) => !errors.has(i))) {
-          yield tx;
-        }
-      }
-
-      dbg("Events stream closed, try again");
+      // TODO: implement
+      // compare checkpoint & block message;
+      // if checkpoint is sync with the block message, wait for it, restart the loop;
+      // wait for the block (on source chain) next to the block message;
+      // prepare block message, post to the target chain;
+      // ?????
+      // PROFIT!!!
     } catch (err) {
-      dbg("Failed to connect, try again", err);
-      await delay(2000);
+      log1.error({ err }, "Loop failed, waiting before retrying");
+      await delay(5000);
+      continue;
     }
+
+    log1.info("loop finished");
+    // TODO: remove the delay, loop can restart immediately and wait for conditions
+    await delay(60000);
   }
 }
 
-function findTransfer(
-  tx: iroha.SignedTransaction,
-): tm.Maybe<Transfer> {
-  return match(tx)
-    .with({
-      value: {
-        payload: {
-          instructions: {
-            kind: "Instructions",
-            value: [{ kind: "Transfer", value: { kind: "Asset", value: P.select("transfer") } }],
-          },
-          metadata: [P.select("destination", { key: { value: "destination" } })],
-        },
-      },
-    }, (found) => tm.maybe.just(found as Transfer))
-    .otherwise(() => tm.maybe.nothing());
-}
+type KeyValueReadWrite<T> = {
+  read: (client: Client) => Promise<tm.Maybe<T>>;
+  write: (client: Client, value: T) => Promise<void>;
+};
 
-/**
- * Forward a transfer that happened on the domestic, _source_ chain:
- *
- * - From user account
- * - To target chain omnibus account
- * - With destination account on the target chain in metadata
- *
- * as a transfer on the hub chain:
- *
- * - From domestic chain omnibus account
- * - To target chain omnibus account
- * - With the same metadata
- */
-function forwardTransferToHub({ transfer, destination }: Transfer): tm.Task<void, unknown> {
-  return tm.task.safelyTry(() =>
-    clients.hub.transaction(
-      iroha.Executable.Instructions([iroha.InstructionBox.Transfer.Asset({
-        object: transfer.object,
-        source: new iroha.AssetId(config.domesticOmnibusAccount, transfer.source.definition),
-        destination: transfer.destination,
-      })]),
-      { metadata: [destination] },
-    ).submit({ verify: true })
-  );
-}
+function createKeyValue<T extends z.ZodSchema>(addr: KeyValueAddress, schema: T): KeyValueReadWrite<z.output<T>> {
+  return {
+    read: async (client) => {
+      const metadata = await match(addr.entity)
+        .returnType<Promise<null | iroha.Metadata>>()
+        .with(
+          { type: "Domain" },
+          ({ id }) =>
+            client.find.domains()
+              .filterWith((x) => iroha.CompoundPredicate.Atom(x.id.equals(id)))
+              .selectWith(x => x.metadata)
+              .executeSingleOpt(),
+        )
+        .with(
+          { type: "Account" },
+          ({ id }) =>
+            client.find.accounts()
+              .filterWith((x) => iroha.CompoundPredicate.Atom(x.id.equals(id)))
+              .selectWith(x => x.metadata)
+              .executeSingleOpt(),
+        )
+        .with(
+          { type: "AssetDefinition" },
+          ({ id }) =>
+            client.find.assetsDefinitions()
+              .filterWith((x) => iroha.CompoundPredicate.Atom(x.id.equals(id)))
+              .selectWith(x => x.metadata)
+              .executeSingleOpt(),
+        )
+        .with(
+          { type: "Nft" },
+          ({ id }) =>
+            client.find.nfts()
+              .filterWith((x) => iroha.CompoundPredicate.Atom(x.id.equals(id)))
+              .selectWith(x => x.metadata)
+              .executeSingleOpt(),
+        )
+        .with(
+          { type: "Trigger" },
+          ({ id }) =>
+            client.find.triggers()
+              .filterWith((x) => iroha.CompoundPredicate.Atom(x.id.equals(id)))
+              .selectWith(x => x.action.metadata)
+              .executeSingleOpt(),
+        )
+        .exhaustive();
 
-/**
- * Forward a transfer that happened on the hub chain:
- *
- * - From the source chain omnibus account
- * - To the target chain omnibus account
- * - With destination account on the domestic chain in metadata
- *
- * as a transfer on the domestic chain. There are two cases:
- *
- * 1. Domestic chain is the target chain. Then, create a transfer from the source chain omnibus account
- *    to the final destination account.
- * 2. Domestic chain is neither the target nor the source chain. Then, simply replicate the transfer between
- *    the omnibus accounts of the respective chains (to maintain totals).
- */
-function forwardTransferToDomestic({ transfer, destination }: Transfer): tm.Task<void, unknown> {
-  return tm.task.safelyTry(async () => {
-    const isSource = transfer.source.account.compare(config.domesticOmnibusAccount) === 0;
-    const isTarget = transfer.destination.compare(config.domesticOmnibusAccount) === 0;
-
-    let instruction: iroha.InstructionBox;
-
-    if (isTarget) {
-      instruction = iroha.InstructionBox.Transfer.Asset({
-        object: transfer.object,
-        source: transfer.source,
-        destination: iroha.AccountId.parse(z.string().parse(destination.value.asValue())),
-      });
-    } else if (!isSource) {
-      instruction = iroha.InstructionBox.Transfer.Asset({
-        object: transfer.object,
-        source: transfer.source,
-        destination: transfer.destination,
-      });
-    } else return;
-
-    await clients.domestic.transaction(iroha.Executable.Instructions([instruction])).submit({ verify: true });
-  });
+      return tm.maybe.of(metadata)
+        .andThen((meta) => tm.maybe.of(meta.find(x => x.key.value === addr.key)))
+        .map((entry) => schema.parse(entry.value.asValue()) as z.output<T> & {});
+    },
+    write: async (client, value) => {
+      unimplemented();
+    },
+  };
 }

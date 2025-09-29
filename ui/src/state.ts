@@ -1,5 +1,17 @@
 import { Client } from "@iroha/client";
-import { Account, Asset, AssetDefinition, AssetDefinitionId, EventBox, EventFilterBox } from "@iroha/core/data-model";
+import {
+  Account,
+  AccountId,
+  Asset,
+  AssetDefinition,
+  AssetDefinitionId,
+  Domain,
+  EventBox,
+  EventFilterBox,
+  Metadata,
+  Trigger,
+  TriggerId,
+} from "@iroha/core/data-model";
 import { type PromiseStaleState, useParamScope, useStaleState, useTask } from "@vue-kakuyaku/core";
 import { useLocalStorage } from "@vueuse/core";
 import RingBuffer from "ringbufferjs";
@@ -29,19 +41,36 @@ export function domesticChains() {
 }
 
 type ChainData = {
-  data: PromiseStaleState<{ accounts: Account[]; assets: Asset[]; assetDefinitions: AssetDefinition[] }>;
+  data: PromiseStaleState<{
+    domains: Domain[];
+    accounts: Account[];
+    assets: Asset[];
+    assetDefinitions: AssetDefinition[];
+    triggers: { id: TriggerId; metadata: Metadata; authority: AccountId }[];
+  }>;
   reload: () => void;
 };
 
 function useChainData(client: Client): ChainData {
   const task = useTask(async () => {
-    const [accounts, defs, assets] = await Promise.all([
+    const [domains, accounts, defs, assets, triggers] = await Promise.all([
+      client.find.domains().executeAll(),
       client.find.accounts().executeAll(),
       client.find.assetsDefinitions().executeAll(),
       client.find.assets().executeAll(),
+      client.find.triggers()
+        // .selectWith((trig) => [trig.id, trig.action. trig.action.metadata])
+        .executeAll(),
     ]);
 
-    return { accounts, assets, assetDefinitions: defs };
+    return {
+      domains,
+      accounts,
+      assets,
+      assetDefinitions: defs,
+      triggers: triggers
+        .map(({ id, action: { metadata, authority } }) => ({ id, authority, metadata })),
+    };
   }, { immediate: true });
 
   const stale = useStaleState(task.state);

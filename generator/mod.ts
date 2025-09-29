@@ -89,6 +89,7 @@ const relayAccounts = new Map(CHAINS.map((chain) => {
   return [chain, {
     alias: `Relay ${chain}`,
     key,
+    // FIXME: Relays must non-privileged
     id: new iroha.AccountId(key.publicKey(), new iroha.DomainId("system")),
   }];
 }));
@@ -447,11 +448,13 @@ function peerServices() {
     .reduce((acc, obj) => ({ ...acc, ...obj }), {});
 }
 
-function relayConfigPath(chain: string) {
-  return `chain-${chain}-relay.json`;
+type RelayConfigKind = "docker" | "localhost";
+
+function relayConfigPath(chain: string, mode: RelayConfigKind) {
+  return `chain-${chain}-relay${mode === "localhost" ? ".localhost" : ""}.json`;
 }
 
-function relayConfig(chain: string): z.input<typeof RelayConfigSchema> {
+function relayConfig(chain: string, mode: RelayConfigKind): z.input<typeof RelayConfigSchema> {
   const account = relayAccounts.get(chain)!;
 
   return {
@@ -459,10 +462,18 @@ function relayConfig(chain: string): z.input<typeof RelayConfigSchema> {
     authorityPrivateKey: account.key.privateKey().multihash(),
     omnibusAccounts: [...omnibusAccounts.values()].map(acc => acc.id.toString()),
     domesticChainId: chain,
-    domesticToriiUrl: `http://${peerServiceId(chain, 0)}:8080`,
+    domesticToriiUrl: mode === "docker"
+      ? `http://${peerServiceId(chain, 0)}:8080`
+      : `http://localhost:${chainPublicPort(chain)}`,
     domesticOmnibusAccount: omnibusAccounts.get(chain)!.id.toString(),
+    domesticCheckpoint: { entity: { type: "Trigger", id: "hub_chain" }, key: "checkpoint" },
+    domesticBlockMessage: { entity: { type: "Account", id: account.id.toString() }, key: "block_message" },
     hubChainId: chainToStr(Hub),
-    hubToriiUrl: `http://${peerServiceId(Hub, 0)}:8080`,
+    hubToriiUrl: mode === "docker"
+      ? `http://${peerServiceId(Hub, 0)}:8080`
+      : `http://localhost:${chainPublicPort(Hub)}`,
+    hubCheckpoint: { entity: { type: "Trigger", id: "hub_chain" }, key: "checkpoint" },
+    hubBlockMessage: { entity: { type: "Account", id: account.id.toString() }, key: "block_message" },
   };
 }
 
@@ -475,7 +486,7 @@ function relayServices() {
       },
       volumes: [".:/config/relay"],
       environment: {
-        RELAY_CONFIG: `/config/relay/${relayConfigPath(chain)}`,
+        RELAY_CONFIG: `/config/relay/${relayConfigPath(chain, "docker")}`,
         DEBUG: "relay",
       },
       depends_on: {
@@ -550,7 +561,7 @@ const dockerCompose = {
     [TRIGGER_BUILDER_SERVICE_NAME]: triggerBuilderService(),
     [EXECUTOR_BUILDER_SERVICE_NAME]: defaultExecutorBuilderService(),
     ...peerServices(),
-    ...relayServices(),
+    // ...relayServices(),
     // ui: uiService(),
   },
 };
@@ -568,7 +579,9 @@ await writeConfig("irohad.toml", TOML.stringify(sharedConfig));
 for (const chain of ALL_CHAINS) {
   await writeConfig(`chain-${chainToStr(chain)}-genesis.json`, JSON.stringify(genesisFor(chain), null, 2));
   if (chain !== Hub) {
-    await writeConfig(relayConfigPath(chain), JSON.stringify(relayConfig(chain), null, 2));
+    for (const mode of ["docker", "localhost"] as const) {
+      await writeConfig(relayConfigPath(chain, mode), JSON.stringify(relayConfig(chain, mode), null, 2));
+    }
   }
 }
 

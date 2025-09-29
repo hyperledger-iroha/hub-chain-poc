@@ -15,12 +15,6 @@ const chainsSorted = computed(() => state.chains.toSorted(x => x.chain === "HUB"
         :chain="x.chain"
       />
     </div>
-
-    <TransferForm
-      :chains="domesticChains()"
-      :assets="transferrableAssets()"
-      class="w-80"
-    />
   </div>
 </template>
 
@@ -31,6 +25,6 @@ html, body {
 }
 
 body {
-  font-family: monospace;
+  font-family: serif;
 }
 </style>
