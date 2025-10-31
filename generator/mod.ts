@@ -6,19 +6,24 @@ import * as fs from "@std/fs";
 import * as path from "@std/path";
 import * as TOML from "@std/toml";
 import * as YAML from "@std/yaml";
-import { JsonValue } from "npm:type-fest@^4.33.0";
 import { z } from "zod";
-import { RelayConfigSchema, UiConfigSchema } from "../ui/shared.ts";
+import {
+  CheckpointSchema,
+  KeyValueEntitySchema,
+  RelayConfigSchema,
+  TriggerConfigSchema,
+  UiConfigSchema,
+} from "../ui/shared.ts";
 
 const dirname = import.meta.dirname;
 assert(dirname);
 
 const CONFIG_DIR = path.relative(Deno.cwd(), path.resolve(dirname, "../config"));
-const EXECUTOR = path.resolve(dirname, "executor.wasm");
 
-const IROHA_IMAGE = `hyperledger/iroha:experimental-xx-8c67c3eb749af3b9c468d5b601d6fd40e1d8a453`;
+// const IROHA_IMAGE = `hyperledger/iroha:experimental-xx-858df795cc8ea480a214ff73f3087a3bbf5f7d85`;
+const IROHA_IMAGE = `hyperledger/iroha:local-uwp`;
 const CHAINS = ["aaa", "bbb", "ccc"];
-const PEERS_ON_CHAIN = 4;
+const PEERS_ON_CHAIN = 1;
 const ACCOUNTS_ON_CHAIN = 3;
 const ASSETS = [
   iroha.AssetDefinitionId.parse("rose#wonderland"),
@@ -27,6 +32,23 @@ const ASSETS = [
 ];
 
 // =============================
+
+const CONFIG_MOUNT = "/config";
+
+const EXECUTOR_BUILDER_SERVICE_NAME = "executor-builder";
+const TRIGGER_BUILDER_SERVICE_NAME = "trigger-builder";
+const TRIGGER_WASM_NAME = "hub_chain_trigger.wasm";
+const TRIGGER_PATH_IN_CONFIG = path.join("wasm", TRIGGER_WASM_NAME);
+
+const METADATA_KEYS = {
+  TRIGGER: {
+    CONFIG: "config",
+    CHECKPOINT: "checkpoint",
+  },
+  RELAY_ACCOUNT: {
+    BLOCK_MESSAGE: "block_message",
+  },
+};
 
 const Hub = Symbol("hub-chain");
 type ChainId = typeof Hub | string;
@@ -67,13 +89,10 @@ const relayAccounts = new Map(CHAINS.map((chain) => {
   return [chain, {
     alias: `Relay ${chain}`,
     key,
+    // FIXME: Relays must non-privileged
     id: new iroha.AccountId(key.publicKey(), new iroha.DomainId("system")),
   }];
 }));
-
-const genesisKeys = new Map<ChainId, iroha.KeyPair>(
-  ([...CHAINS, Hub] as const).map((chain) => [chain, iroha.KeyPair.random()]),
-);
 
 const peerKeys = new Map<ChainId, iroha.KeyPair[]>(
   ([...CHAINS, Hub] as const).map(
@@ -95,7 +114,11 @@ const sharedConfig = {
   torii: {
     address: "0.0.0.0:8080",
   },
-  logger: { format: "pretty", filter: "iroha_core=debug" },
+  logger: {
+    format: "pretty",
+    // TODO: in iroha, change "WASM" module to something with "iroha_" prefix?
+    filter: "iroha_core=debug,WASM=trace",
+  },
 };
 
 function chainToStr(chain: ChainId): string {
@@ -121,6 +144,17 @@ function genesisFor(chain: ChainId) {
   let mintAssets: { id: iroha.AssetId; quantity: number | string }[];
   let transferPermissions: { account: iroha.AccountId; asset: iroha.AssetDefinitionId }[];
 
+  let wasmTriggers: {
+    id: string;
+    action: {
+      executable: string;
+      repeats: string;
+      authority: string;
+      filter: unknown;
+    };
+  }[];
+  let setKeyValueInstructions: ({ key: string; value: unknown } & z.infer<typeof KeyValueEntitySchema>)[];
+
   if (chain !== Hub) {
     const accounts = userAccounts.get(chain)!;
     const relay = relayAccounts.get(chain)!;
@@ -143,6 +177,54 @@ function genesisFor(chain: ChainId) {
         account: acc.id,
       }))
     );
+
+    const TRIGGER_ID = "hub_chain";
+
+    wasmTriggers = [
+      {
+        id: TRIGGER_ID,
+        action: {
+          executable: TRIGGER_PATH_IN_CONFIG,
+          repeats: "Indefinitely",
+          authority: admin.id.toString(),
+          filter: { Time: { PreCommit: null } },
+        },
+      },
+    ];
+
+    const triggerConfig: z.infer<typeof TriggerConfigSchema> = {
+      mode: { type: "Domestic", chain },
+      checkpoint_addr: {
+        entity: { type: "Trigger", id: TRIGGER_ID },
+        key: METADATA_KEYS.TRIGGER.CHECKPOINT,
+      },
+      block_message_addr: {
+        entity: { type: "Account", id: relay.id },
+        key: METADATA_KEYS.RELAY_ACCOUNT.BLOCK_MESSAGE,
+      },
+      chains: Object.fromEntries(
+        [...omnibusAccounts]
+          .filter(([chainX]) => chainX !== chain)
+          .map(([chain, acc]) => [chain, { omnibus_account: acc.id }]),
+      ),
+    };
+
+    setKeyValueInstructions = [
+      {
+        type: "Trigger",
+        id: TRIGGER_ID,
+        key: METADATA_KEYS.TRIGGER.CONFIG,
+        value: triggerConfig,
+      },
+      {
+        type: "Trigger",
+        id: TRIGGER_ID,
+        key: METADATA_KEYS.TRIGGER.CHECKPOINT,
+        value: CheckpointSchema.encode({
+          validators: new Set(peerKeys.get(Hub)!.map(x => x.publicKey())),
+        }),
+      },
+    ];
   } else {
     const relays = CHAINS.map(x => relayAccounts.get(x)!);
 
@@ -161,6 +243,54 @@ function genesisFor(chain: ChainId) {
         account: relay.id,
       }))
     );
+
+    const triggerId = (chain: string) => `hub_chain_for_${chain}`;
+
+    wasmTriggers = CHAINS.map(chain => ({
+      id: triggerId(chain),
+      action: {
+        executable: TRIGGER_PATH_IN_CONFIG,
+        repeats: "Indefinitely",
+        authority: admin.id.toString(),
+        filter: { Time: { PreCommit: null } },
+      },
+    }));
+
+    setKeyValueInstructions = CHAINS.flatMap((chain) => {
+      const triggerConfig: z.infer<typeof TriggerConfigSchema> = {
+        mode: { type: "Domestic", chain },
+        checkpoint_addr: {
+          entity: { type: "Trigger", id: triggerId(chain) },
+          key: METADATA_KEYS.TRIGGER.CHECKPOINT,
+        },
+        block_message_addr: {
+          entity: { type: "Account", id: relayAccounts.get(chain)!.id },
+          key: METADATA_KEYS.RELAY_ACCOUNT.BLOCK_MESSAGE,
+        },
+        chains: Object.fromEntries(
+          [...omnibusAccounts]
+            .filter(([chainX]) => chainX !== chain)
+            .map(([chain, acc]) => [chain, { omnibus_account: acc.id }]),
+        ),
+      };
+
+      return [
+        {
+          type: "Trigger",
+          id: triggerId(chain),
+          key: METADATA_KEYS.TRIGGER.CONFIG,
+          value: triggerConfig,
+        },
+        {
+          type: "Trigger",
+          id: triggerId(chain),
+          key: METADATA_KEYS.TRIGGER.CHECKPOINT,
+          value: CheckpointSchema.encode({
+            validators: new Set(peerKeys.get(Hub)!.map(x => x.publicKey())),
+          }),
+        },
+      ];
+    });
   }
 
   const instructions = [
@@ -215,22 +345,33 @@ function genesisFor(chain: ChainId) {
         },
       },
     })),
+
+    ...setKeyValueInstructions.map(x => ({
+      SetKeyValue: {
+        [x.type]: {
+          object: x.id,
+          key: x.key,
+          value: x.value,
+        },
+      },
+    })),
   ];
 
   const topology = peerKeys.get(chain)!.map(x => x.publicKey());
 
   return {
+    creation_time: new Date().toISOString(),
     chain: chainToStr(chain),
-    executor: "executor.wasm",
+    executor: "wasm/executor.wasm",
     instructions,
-    wasm_dir: "PLACEHOLDER",
-    wasm_triggers: [],
+    wasm_dir: ".",
+    wasm_triggers: wasmTriggers,
     topology,
-    "parameters": {
-      "sumeragi": {
-        "block_time_ms": 500,
-        "commit_time_ms": 1000,
-        "max_clock_drift_ms": 1000,
+    parameters: {
+      sumeragi: {
+        block_time_ms: 500,
+        commit_time_ms: 1000,
+        max_clock_drift_ms: 1000,
       },
     },
   };
@@ -248,7 +389,6 @@ function chainPublicPort(chain: ChainId): number {
 
 function peerComposeService(chain: ChainId, i: number) {
   const peerKey = peerKeys.get(chain)!.at(i)!;
-  const genesisKey = genesisKeys.get(chain)!;
 
   const id = peerServiceId(chain, i);
   const trustedPeers = JSON.stringify(
@@ -261,31 +401,15 @@ function peerComposeService(chain: ChainId, i: number) {
 
   const environment = {
     CHAIN: chainToStr(chain),
+    GENESIS: `${CONFIG_MOUNT}/chain-${chainToStr(chain)}-genesis.json`,
     PUBLIC_KEY: peerKey.publicKey().multihash(),
     PRIVATE_KEY: peerKey.privateKey().multihash(),
-    GENESIS_PUBLIC_KEY: genesisKey.publicKey().multihash(),
     P2P_PUBLIC_ADDRESS: `${id}:1337`,
     TRUSTED_PEERS: trustedPeers,
     TERMINAL_COLORS: "true",
   };
 
-  const isGenesis = i === 0;
-  if (isGenesis) {
-    Object.assign(environment, {
-      GENESIS: "/tmp/genesis.signed.scale",
-      GENESIS_PRIVATE_KEY: genesisKey.privateKey().multihash(),
-    });
-  }
-
-  const command = isGenesis
-    ? `/bin/sh -c "
-  kagami genesis sign /config/chain-${chainToStr(chain)}-genesis.json \\\n\
-    --public-key $GENESIS_PUBLIC_KEY \\\n\
-    --private-key $GENESIS_PRIVATE_KEY \\\n\
-    --out-file /tmp/genesis.signed.scale \\\n\
-  && irohad --config /config/irohad.toml
-"`
-    : `irohad --config /config/irohad.toml`;
+  const command = `irohad --config ${CONFIG_MOUNT}/irohad.toml`;
 
   const ports = i === 0 ? [`${chainPublicPort(chain)}:8080`] : [];
 
@@ -293,15 +417,23 @@ function peerComposeService(chain: ChainId, i: number) {
     [id]: {
       image: IROHA_IMAGE,
       volumes: [
-        ".:/config",
+        `.:${CONFIG_MOUNT}`,
       ],
       environment,
       ports,
       init: true,
       command,
+      depends_on: {
+        [TRIGGER_BUILDER_SERVICE_NAME]: {
+          condition: "service_completed_successfully",
+        },
+        [EXECUTOR_BUILDER_SERVICE_NAME]: {
+          condition: "service_completed_successfully",
+        },
+      },
       healthcheck: {
         test: "test $(curl -s http://127.0.0.1:8080/status/blocks) -gt 0",
-        interval: "1s",
+        interval: "3s",
         timeout: "200ms",
         retries: "10",
         start_period: "2s",
@@ -316,11 +448,13 @@ function peerServices() {
     .reduce((acc, obj) => ({ ...acc, ...obj }), {});
 }
 
-function relayConfigPath(chain: string) {
-  return `chain-${chain}-relay.json`;
+type RelayConfigKind = "docker" | "localhost";
+
+function relayConfigPath(chain: string, mode: RelayConfigKind) {
+  return `chain-${chain}-relay${mode === "localhost" ? ".localhost" : ""}.json`;
 }
 
-function relayConfig(chain: string): z.input<typeof RelayConfigSchema> {
+function relayConfig(chain: string, mode: RelayConfigKind): z.input<typeof RelayConfigSchema> {
   const account = relayAccounts.get(chain)!;
 
   return {
@@ -328,10 +462,18 @@ function relayConfig(chain: string): z.input<typeof RelayConfigSchema> {
     authorityPrivateKey: account.key.privateKey().multihash(),
     omnibusAccounts: [...omnibusAccounts.values()].map(acc => acc.id.toString()),
     domesticChainId: chain,
-    domesticToriiUrl: `http://${peerServiceId(chain, 0)}:8080`,
+    domesticToriiUrl: mode === "docker"
+      ? `http://${peerServiceId(chain, 0)}:8080`
+      : `http://localhost:${chainPublicPort(chain)}`,
     domesticOmnibusAccount: omnibusAccounts.get(chain)!.id.toString(),
+    domesticCheckpoint: { entity: { type: "Trigger", id: "hub_chain" }, key: "checkpoint" },
+    domesticBlockMessage: { entity: { type: "Account", id: account.id.toString() }, key: "block_message" },
     hubChainId: chainToStr(Hub),
-    hubToriiUrl: `http://${peerServiceId(Hub, 0)}:8080`,
+    hubToriiUrl: mode === "docker"
+      ? `http://${peerServiceId(Hub, 0)}:8080`
+      : `http://localhost:${chainPublicPort(Hub)}`,
+    hubCheckpoint: { entity: { type: "Trigger", id: "hub_chain" }, key: "checkpoint" },
+    hubBlockMessage: { entity: { type: "Account", id: account.id.toString() }, key: "block_message" },
   };
 }
 
@@ -344,7 +486,7 @@ function relayServices() {
       },
       volumes: [".:/config/relay"],
       environment: {
-        RELAY_CONFIG: `/config/relay/${relayConfigPath(chain)}`,
+        RELAY_CONFIG: `/config/relay/${relayConfigPath(chain, "docker")}`,
         DEBUG: "relay",
       },
       depends_on: {
@@ -394,11 +536,33 @@ function uiService() {
   };
 }
 
+function triggerBuilderService() {
+  return {
+    build: {
+      context: "../trigger",
+    },
+    volumes: [`../config/wasm:/usr/wasm`],
+    command: `\
+sh -c "
+  cp /app/outputs/* /usr/wasm/ &&
+  echo 'Copied WASMs'
+"`,
+  };
+}
+
+function defaultExecutorBuilderService() {
+  const cfg = triggerBuilderService();
+  cfg.build.context = `../executor`;
+  return cfg;
+}
+
 const dockerCompose = {
   services: {
+    [TRIGGER_BUILDER_SERVICE_NAME]: triggerBuilderService(),
+    [EXECUTOR_BUILDER_SERVICE_NAME]: defaultExecutorBuilderService(),
     ...peerServices(),
-    ...relayServices(),
-    ui: uiService(),
+    // ...relayServices(),
+    // ui: uiService(),
   },
 };
 
@@ -415,13 +579,11 @@ await writeConfig("irohad.toml", TOML.stringify(sharedConfig));
 for (const chain of ALL_CHAINS) {
   await writeConfig(`chain-${chainToStr(chain)}-genesis.json`, JSON.stringify(genesisFor(chain), null, 2));
   if (chain !== Hub) {
-    await writeConfig(relayConfigPath(chain), JSON.stringify(relayConfig(chain), null, 2));
+    for (const mode of ["docker", "localhost"] as const) {
+      await writeConfig(relayConfigPath(chain, mode), JSON.stringify(relayConfig(chain, mode), null, 2));
+    }
   }
 }
-
-const executorDest = path.join(CONFIG_DIR, "executor.wasm");
-$.logStep("Writing", executorDest);
-await Deno.copyFile(EXECUTOR, executorDest);
 
 await writeConfig("ui.json", JSON.stringify(uiConfig(), null, 2));
 
